@@ -1,8 +1,19 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 export default function ComplaintPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const editComplaintId =
+    searchParams.get("id") ||
+    searchParams.get("edit") ||
+    searchParams.get("complaintId");
+
+  const isEditMode = Boolean(editComplaintId);
+
   const [image, setImage] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
 
@@ -19,9 +30,97 @@ export default function ComplaintPage() {
   const [locationDetails, setLocationDetails] = useState("");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingComplaint, setIsLoadingComplaint] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * Load existing complaint when Edit mode is opened
+   */
+  useEffect(() => {
+    if (!isEditMode || !editComplaintId) {
+      return;
+    }
+
+    const loadComplaint = async () => {
+      setIsLoadingComplaint(true);
+
+      try {
+        const citizenId = localStorage.getItem("citycare_citizen_id");
+
+        if (!citizenId) {
+          alert("Citizen information not found. Please login again.");
+          router.push("/citizen/complaints");
+          return;
+        }
+
+        const response = await fetch(
+          `/api/complaints?citizenId=${encodeURIComponent(citizenId)}`
+        );
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(
+            data.message || "Failed to load complaint."
+          );
+        }
+
+        const complaint = data.complaints?.find(
+          (item: any) => item._id === editComplaintId
+        );
+
+        if (!complaint) {
+          alert("Complaint not found.");
+          router.push("/citizen/complaints");
+          return;
+        }
+
+        /*
+         * Fill existing complaint data
+         */
+        setCategory(complaint.category || "");
+        setDescription(complaint.description || "");
+
+        setImage(complaint.imageUrl || null);
+        setImageFile(null);
+
+        setLocation(complaint.location?.address || "");
+        setLatitude(
+          typeof complaint.location?.latitude === "number"
+            ? complaint.location.latitude
+            : null
+        );
+        setLongitude(
+          typeof complaint.location?.longitude === "number"
+            ? complaint.location.longitude
+            : null
+        );
+
+        setLandmark(complaint.landmark || "");
+        setLocationDetails(complaint.locationDetails || "");
+
+        if (complaint.landmark || complaint.locationDetails) {
+          setShowLocationDetails(true);
+        }
+      } catch (error) {
+        console.error("Load complaint error:", error);
+
+        alert(
+          error instanceof Error
+            ? error.message
+            : "Something went wrong while loading the complaint."
+        );
+
+        router.push("/citizen/complaints");
+      } finally {
+        setIsLoadingComplaint(false);
+      }
+    };
+
+    loadComplaint();
+  }, [editComplaintId, isEditMode, router]);
 
   const handleImageUpload = (
     event: React.ChangeEvent<HTMLInputElement>
@@ -187,7 +286,18 @@ export default function ComplaintPage() {
   };
 
   const handleSubmit = async () => {
-    if (!imageFile) {
+    /*
+     * In normal mode photo is required.
+     *
+     * In edit mode an existing photo can remain unchanged,
+     * so a new image file is not required.
+     */
+    if (!isEditMode && !imageFile) {
+      alert("Please upload or take a photo of the problem.");
+      return;
+    }
+
+    if (isEditMode && !image) {
       alert("Please upload or take a photo of the problem.");
       return;
     }
@@ -216,29 +326,6 @@ export default function ComplaintPage() {
 
     try {
       /*
-       * Step 1:
-       * Upload selected image to Cloudinary
-       */
-      const formData = new FormData();
-      formData.append("file", imageFile);
-
-      const uploadResponse = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      const uploadData = await uploadResponse.json();
-
-      if (!uploadResponse.ok || !uploadData.success) {
-        throw new Error(
-          uploadData.message || "Failed to upload complaint image."
-        );
-      }
-
-      const cloudinaryImageUrl = uploadData.imageUrl;
-
-      /*
-       * Step 2:
        * Get citizen ID
        */
       let citizenId = localStorage.getItem("citycare_citizen_id");
@@ -249,8 +336,77 @@ export default function ComplaintPage() {
       }
 
       /*
-       * Step 3:
-       * Save complaint with Cloudinary image URL
+       * Image URL
+       *
+       * If user selected a new image:
+       * upload it to Cloudinary.
+       *
+       * If user did not select a new image:
+       * keep the existing image URL.
+       */
+      let cloudinaryImageUrl = image || "";
+
+      if (imageFile) {
+        const formData = new FormData();
+        formData.append("file", imageFile);
+
+        const uploadResponse = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        const uploadData = await uploadResponse.json();
+
+        if (!uploadResponse.ok || !uploadData.success) {
+          throw new Error(
+            uploadData.message || "Failed to upload complaint image."
+          );
+        }
+
+        cloudinaryImageUrl = uploadData.imageUrl;
+      }
+
+      /*
+       * EDIT MODE
+       */
+      if (isEditMode && editComplaintId) {
+        const response = await fetch("/api/complaints", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            complaintId: editComplaintId,
+            citizenId,
+            category,
+            description: description.trim(),
+            imageUrl: cloudinaryImageUrl,
+            location: {
+              latitude,
+              longitude,
+              address: location,
+            },
+            landmark: landmark.trim(),
+            locationDetails: locationDetails.trim(),
+          }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(
+            data.message || "Failed to update complaint."
+          );
+        }
+
+        alert("Complaint updated successfully.");
+
+        router.push("/citizen/complaints");
+        return;
+      }
+
+      /*
+       * NORMAL CREATE MODE
        */
       const response = await fetch("/api/complaints", {
         method: "POST",
@@ -282,6 +438,9 @@ export default function ComplaintPage() {
 
       alert("Complaint submitted successfully.");
 
+      /*
+       * Clear the complaint form
+       */
       setImage(null);
       setImageFile(null);
       setCategory("");
@@ -300,6 +459,11 @@ export default function ComplaintPage() {
       if (cameraInputRef.current) {
         cameraInputRef.current.value = "";
       }
+
+      /*
+       * Open My Complaints automatically
+       */
+      router.push("/citizen/complaints");
     } catch (error) {
       console.error("Complaint submission error:", error);
 
@@ -313,6 +477,29 @@ export default function ComplaintPage() {
     }
   };
 
+  /*
+   * Loading screen while existing complaint is being loaded
+   */
+  if (isEditMode && isLoadingComplaint) {
+    return (
+      <main className="px-6 py-10">
+        <div className="mx-auto flex min-h-[400px] w-full max-w-4xl items-center justify-center">
+          <div className="rounded-2xl border bg-white px-8 py-10 text-center shadow-md">
+            <div className="text-4xl">⏳</div>
+
+            <h2 className="mt-4 text-xl font-bold text-gray-900">
+              Loading Complaint...
+            </h2>
+
+            <p className="mt-2 text-sm text-gray-600">
+              Please wait while we load your complaint details.
+            </p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="px-6 py-10">
       <div className="mx-auto w-full max-w-4xl">
@@ -320,11 +507,13 @@ export default function ComplaintPage() {
         {/* Page Header */}
         <div>
           <h2 className="text-3xl font-bold text-gray-900">
-            Raise a Complaint
+            {isEditMode ? "Edit Complaint" : "Raise a Complaint"}
           </h2>
 
           <p className="mt-2 text-gray-700">
-            Report a civic problem by providing its photo and details.
+            {isEditMode
+              ? "Update the details of your complaint and save the changes."
+              : "Report a civic problem by providing its photo and details."}
           </p>
         </div>
 
@@ -728,7 +917,13 @@ export default function ComplaintPage() {
             disabled={isSubmitting}
             className="rounded-xl bg-blue-600 px-8 py-3.5 text-base font-bold text-white shadow-md transition hover:bg-blue-700 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isSubmitting ? "Submitting Complaint..." : "Submit Complaint"}
+            {isSubmitting
+              ? isEditMode
+                ? "Updating Complaint..."
+                : "Submitting Complaint..."
+              : isEditMode
+              ? "Update Complaint"
+              : "Submit Complaint"}
           </button>
 
         </div>

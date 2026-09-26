@@ -1,6 +1,77 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
+
+type Complaint = {
+  _id: string;
+  category: string;
+  description: string;
+  status:
+    | "Reported"
+    | "Verified"
+    | "Assigned"
+    | "In Progress"
+    | "Resolved";
+  createdAt: string;
+};
 
 export default function CitizenDashboard() {
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchComplaints = async () => {
+      try {
+        const citizenId = localStorage.getItem("citycare_citizen_id");
+
+        if (!citizenId) {
+          setComplaints([]);
+          setIsLoading(false);
+          return;
+        }
+
+        const response = await fetch(
+          `/api/complaints?citizenId=${encodeURIComponent(citizenId)}`
+        );
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(
+            data.message || "Failed to fetch complaints."
+          );
+        }
+
+        setComplaints(data.complaints || []);
+      } catch (error) {
+        console.error("Dashboard complaint fetch error:", error);
+        setComplaints([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchComplaints();
+  }, []);
+
+  const pendingCount = complaints.filter(
+    (complaint) =>
+      complaint.status === "Reported" ||
+      complaint.status === "Verified" ||
+      complaint.status === "Assigned"
+  ).length;
+
+  const inProgressCount = complaints.filter(
+    (complaint) => complaint.status === "In Progress"
+  ).length;
+
+  const resolvedCount = complaints.filter(
+    (complaint) => complaint.status === "Resolved"
+  ).length;
+
+  const recentComplaints = complaints.slice(0, 3);
+
   return (
     <main className="px-6 py-10">
       <div className="mx-auto w-full max-w-7xl">
@@ -19,7 +90,6 @@ export default function CitizenDashboard() {
 
         {/* Quick Actions */}
         <section className="mt-10">
-
           <h2 className="text-2xl font-bold text-gray-900">
             Quick Actions
           </h2>
@@ -32,7 +102,7 @@ export default function CitizenDashboard() {
 
             <Link
               href="/citizen/complaint"
-              className="rounded-2xl border bg-white p-7 shadow-md hover:-translate-y-1 hover:shadow-xl transition"
+              className="rounded-2xl border bg-white p-7 shadow-md transition hover:-translate-y-1 hover:shadow-xl"
             >
               <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-blue-100 text-3xl">
                 📝
@@ -54,7 +124,7 @@ export default function CitizenDashboard() {
 
             <Link
               href="/citizen/complaints"
-              className="rounded-2xl border bg-white p-7 shadow-md hover:-translate-y-1 hover:shadow-xl transition"
+              className="rounded-2xl border bg-white p-7 shadow-md transition hover:-translate-y-1 hover:shadow-xl"
             >
               <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-green-100 text-3xl">
                 📋
@@ -76,7 +146,7 @@ export default function CitizenDashboard() {
 
             <Link
               href="/citizen/feedback"
-              className="rounded-2xl border bg-white p-7 shadow-md hover:-translate-y-1 hover:shadow-xl transition"
+              className="rounded-2xl border bg-white p-7 shadow-md transition hover:-translate-y-1 hover:shadow-xl"
             >
               <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-purple-100 text-3xl">
                 ⭐
@@ -100,7 +170,6 @@ export default function CitizenDashboard() {
 
         {/* Complaint Summary */}
         <section className="mt-10">
-
           <h2 className="text-2xl font-bold text-gray-900">
             Complaint Summary
           </h2>
@@ -113,7 +182,7 @@ export default function CitizenDashboard() {
               </p>
 
               <p className="mt-2 text-3xl font-bold text-blue-600">
-                0
+                {complaints.length}
               </p>
             </div>
 
@@ -123,7 +192,7 @@ export default function CitizenDashboard() {
               </p>
 
               <p className="mt-2 text-3xl font-bold text-yellow-600">
-                0
+                {pendingCount}
               </p>
             </div>
 
@@ -133,7 +202,7 @@ export default function CitizenDashboard() {
               </p>
 
               <p className="mt-2 text-3xl font-bold text-orange-600">
-                0
+                {inProgressCount}
               </p>
             </div>
 
@@ -143,7 +212,7 @@ export default function CitizenDashboard() {
               </p>
 
               <p className="mt-2 text-3xl font-bold text-green-600">
-                0
+                {resolvedCount}
               </p>
             </div>
 
@@ -172,29 +241,103 @@ export default function CitizenDashboard() {
             </Link>
           </div>
 
-          <div className="mt-5 rounded-2xl border bg-white p-8 text-center shadow-md">
+          {/* Loading */}
+          {isLoading && (
+            <div className="mt-5 rounded-2xl border bg-white p-8 text-center shadow-md">
+              <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600" />
 
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 text-3xl">
-              📋
+              <p className="mt-3 text-sm font-semibold text-gray-700">
+                Loading recent complaints...
+              </p>
             </div>
+          )}
 
-            <h3 className="mt-4 text-lg font-bold text-gray-900">
-              No complaints yet
-            </h3>
+          {/* No Complaints */}
+          {!isLoading && recentComplaints.length === 0 && (
+            <div className="mt-5 rounded-2xl border bg-white p-8 text-center shadow-md">
 
-            <p className="mt-2 text-sm text-gray-600">
-              Your recent complaints will appear here after you submit a
-              complaint.
-            </p>
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 text-3xl">
+                📋
+              </div>
 
-            <Link
-              href="/citizen/complaint"
-              className="mt-5 inline-block rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white transition hover:bg-blue-700"
-            >
-              Report a Problem
-            </Link>
+              <h3 className="mt-4 text-lg font-bold text-gray-900">
+                No complaints yet
+              </h3>
 
-          </div>
+              <p className="mt-2 text-sm text-gray-600">
+                Your recent complaints will appear here after you submit a
+                complaint.
+              </p>
+
+              <Link
+                href="/citizen/complaint"
+                className="mt-5 inline-block rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+              >
+                Report a Problem
+              </Link>
+
+            </div>
+          )}
+
+          {/* Recent Complaint Cards */}
+          {!isLoading && recentComplaints.length > 0 && (
+            <div className="mt-5 space-y-4">
+
+              {recentComplaints.map((complaint) => (
+                <Link
+                  key={complaint._id}
+                  href={`/citizen/complaints/${complaint._id}`}
+                  className="block rounded-2xl border bg-white p-5 shadow-md transition hover:-translate-y-1 hover:shadow-lg"
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900">
+                        {complaint.category}
+                      </h3>
+
+                      <p className="mt-1 line-clamp-2 text-sm text-gray-600">
+                        {complaint.description}
+                      </p>
+
+                      <p className="mt-2 text-xs text-gray-500">
+                        Submitted on{" "}
+                        {new Date(
+                          complaint.createdAt
+                        ).toLocaleString("en-IN")}
+                      </p>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-3">
+
+                      <span
+                        className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                          complaint.status === "Resolved"
+                            ? "bg-green-100 text-green-700"
+                            : complaint.status === "In Progress"
+                            ? "bg-orange-100 text-orange-700"
+                            : complaint.status === "Verified"
+                            ? "bg-blue-100 text-blue-700"
+                            : complaint.status === "Assigned"
+                            ? "bg-purple-100 text-purple-700"
+                            : "bg-yellow-100 text-yellow-700"
+                        }`}
+                      >
+                        {complaint.status}
+                      </span>
+
+                      <span className="text-lg text-gray-400">
+                        →
+                      </span>
+
+                    </div>
+
+                  </div>
+                </Link>
+              ))}
+
+            </div>
+          )}
 
         </section>
 

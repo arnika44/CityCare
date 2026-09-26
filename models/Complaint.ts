@@ -1,5 +1,15 @@
 import mongoose, { Schema, Document } from "mongoose";
 
+export interface IStatusHistory {
+  status:
+    | "Reported"
+    | "Verified"
+    | "Assigned"
+    | "In Progress"
+    | "Resolved";
+  timestamp: Date;
+}
+
 export interface IComplaint extends Document {
   citizenId: string;
   category: string;
@@ -13,9 +23,35 @@ export interface IComplaint extends Document {
   landmark?: string;
   locationDetails?: string;
   status: "Reported" | "Verified" | "Assigned" | "In Progress" | "Resolved";
+  statusHistory: IStatusHistory[];
   createdAt: Date;
   updatedAt: Date;
 }
+
+const StatusHistorySchema = new Schema<IStatusHistory>(
+  {
+    status: {
+      type: String,
+      enum: [
+        "Reported",
+        "Verified",
+        "Assigned",
+        "In Progress",
+        "Resolved",
+      ],
+      required: true,
+    },
+
+    timestamp: {
+      type: Date,
+      required: true,
+      default: Date.now,
+    },
+  },
+  {
+    _id: false,
+  }
+);
 
 const ComplaintSchema = new Schema<IComplaint>(
   {
@@ -68,8 +104,26 @@ const ComplaintSchema = new Schema<IComplaint>(
 
     status: {
       type: String,
-      enum: ["Reported", "Verified", "Assigned", "In Progress", "Resolved"],
+      enum: [
+        "Reported",
+        "Verified",
+        "Assigned",
+        "In Progress",
+        "Resolved",
+      ],
       default: "Reported",
+    },
+
+    statusHistory: {
+      type: [StatusHistorySchema],
+      default: function () {
+        return [
+          {
+            status: "Reported",
+            timestamp: new Date(),
+          },
+        ];
+      },
     },
   },
   {
