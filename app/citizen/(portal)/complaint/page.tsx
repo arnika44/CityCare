@@ -9,10 +9,14 @@ export default function ComplaintPage() {
   const [isListening, setIsListening] = useState(false);
 
   const [location, setLocation] = useState("");
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [showLocationDetails, setShowLocationDetails] = useState(false);
   const [landmark, setLandmark] = useState("");
   const [locationDetails, setLocationDetails] = useState("");
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -98,15 +102,20 @@ export default function ComplaintPage() {
 
     setIsGettingLocation(true);
     setLocation("");
+    setLatitude(null);
+    setLongitude(null);
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
-        const latitude = position.coords.latitude;
-        const longitude = position.coords.longitude;
+        const currentLatitude = position.coords.latitude;
+        const currentLongitude = position.coords.longitude;
+
+        setLatitude(currentLatitude);
+        setLongitude(currentLongitude);
 
         try {
           const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${currentLatitude}&lon=${currentLongitude}&zoom=18&addressdetails=1`
           );
 
           if (!response.ok) {
@@ -148,6 +157,8 @@ export default function ComplaintPage() {
       },
       () => {
         setIsGettingLocation(false);
+        setLatitude(null);
+        setLongitude(null);
 
         alert(
           "Unable to get your location. Please allow location permission and try again."
@@ -161,7 +172,7 @@ export default function ComplaintPage() {
     );
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!image) {
       alert("Please upload a photo of the problem.");
       return;
@@ -182,7 +193,75 @@ export default function ComplaintPage() {
       return;
     }
 
-    alert("Complaint form is ready to be submitted.");
+    if (latitude === null || longitude === null) {
+      alert("Please detect your current location again.");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      let citizenId = localStorage.getItem("citycare_citizen_id");
+
+      if (!citizenId) {
+        citizenId = crypto.randomUUID();
+        localStorage.setItem("citycare_citizen_id", citizenId);
+      }
+
+      const response = await fetch("/api/complaints", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          citizenId,
+          category,
+          description: description.trim(),
+          imageUrl: "",
+          location: {
+            latitude,
+            longitude,
+            address: location,
+          },
+          landmark: landmark.trim(),
+          locationDetails: locationDetails.trim(),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Failed to submit complaint."
+        );
+      }
+
+      alert("Complaint submitted successfully.");
+
+      setImage(null);
+      setCategory("");
+      setDescription("");
+      setLocation("");
+      setLatitude(null);
+      setLongitude(null);
+      setLandmark("");
+      setLocationDetails("");
+      setShowLocationDetails(false);
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    } catch (error) {
+      console.error("Complaint submission error:", error);
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while submitting the complaint."
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -571,9 +650,10 @@ export default function ComplaintPage() {
           <button
             type="button"
             onClick={handleSubmit}
-            className="rounded-xl bg-blue-600 px-8 py-3.5 text-base font-bold text-white shadow-md transition hover:bg-blue-700 hover:shadow-lg"
+            disabled={isSubmitting}
+            className="rounded-xl bg-blue-600 px-8 py-3.5 text-base font-bold text-white shadow-md transition hover:bg-blue-700 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Submit Complaint
+            {isSubmitting ? "Submitting Complaint..." : "Submit Complaint"}
           </button>
 
         </div>

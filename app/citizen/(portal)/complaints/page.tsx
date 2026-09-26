@@ -1,9 +1,83 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
+
+type Complaint = {
+  _id: string;
+  category: string;
+  description: string;
+  imageUrl?: string;
+  location: {
+    latitude: number;
+    longitude: number;
+    address?: string;
+  };
+  landmark?: string;
+  locationDetails?: string;
+  status: "Reported" | "Verified" | "Assigned" | "In Progress" | "Resolved";
+  createdAt: string;
+};
 
 export default function MyComplaintsPage() {
-  const complaints: any[] = [];
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const fetchComplaints = async () => {
+      try {
+        const citizenId = localStorage.getItem("citycare_citizen_id");
+
+        if (!citizenId) {
+          setComplaints([]);
+          setIsLoading(false);
+          return;
+        }
+
+        const response = await fetch(
+          `/api/complaints?citizenId=${encodeURIComponent(citizenId)}`
+        );
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(
+            data.message || "Failed to fetch complaints."
+          );
+        }
+
+        setComplaints(data.complaints || []);
+      } catch (error) {
+        console.error("Complaint fetch error:", error);
+
+        setError(
+          error instanceof Error
+            ? error.message
+            : "Unable to load complaints."
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchComplaints();
+  }, []);
+
+  const pendingCount = complaints.filter(
+    (complaint) =>
+      complaint.status === "Reported" ||
+      complaint.status === "Verified" ||
+      complaint.status === "Assigned"
+  ).length;
+
+  const inProgressCount = complaints.filter(
+    (complaint) => complaint.status === "In Progress"
+  ).length;
+
+  const resolvedCount = complaints.filter(
+    (complaint) => complaint.status === "Resolved"
+  ).length;
 
   return (
     <main className="px-6 py-10">
@@ -39,7 +113,7 @@ export default function MyComplaintsPage() {
             </p>
 
             <p className="mt-2 text-3xl font-bold text-yellow-600">
-              0
+              {pendingCount}
             </p>
           </div>
 
@@ -49,7 +123,7 @@ export default function MyComplaintsPage() {
             </p>
 
             <p className="mt-2 text-3xl font-bold text-orange-600">
-              0
+              {inProgressCount}
             </p>
           </div>
 
@@ -59,7 +133,7 @@ export default function MyComplaintsPage() {
             </p>
 
             <p className="mt-2 text-3xl font-bold text-green-600">
-              0
+              {resolvedCount}
             </p>
           </div>
 
@@ -87,30 +161,136 @@ export default function MyComplaintsPage() {
             </Link>
           </div>
 
-          {/* Empty State */}
-          <div className="mt-6 rounded-2xl border bg-white p-10 text-center shadow-md">
+          {/* Loading State */}
+          {isLoading && (
+            <div className="mt-6 rounded-2xl border bg-white p-10 text-center shadow-md">
+              <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600" />
 
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-3xl">
-              📋
+              <p className="mt-4 font-semibold text-gray-700">
+                Loading your complaints...
+              </p>
             </div>
+          )}
 
-            <h3 className="mt-5 text-xl font-bold text-gray-900">
-              No Complaints Yet
-            </h3>
+          {/* Error State */}
+          {!isLoading && error && (
+            <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+              <p className="font-semibold text-red-700">
+                {error}
+              </p>
+            </div>
+          )}
 
-            <p className="mx-auto mt-2 max-w-md text-gray-600">
-              You have not submitted any civic complaints yet. Once you
-              submit a complaint, it will appear here.
-            </p>
+          {/* Empty State */}
+          {!isLoading && !error && complaints.length === 0 && (
+            <div className="mt-6 rounded-2xl border bg-white p-10 text-center shadow-md">
 
-            <Link
-              href="/citizen/complaint"
-              className="mt-6 inline-block rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-700"
-            >
-              Raise Your First Complaint
-            </Link>
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-3xl">
+                📋
+              </div>
 
-          </div>
+              <h3 className="mt-5 text-xl font-bold text-gray-900">
+                No Complaints Yet
+              </h3>
+
+              <p className="mx-auto mt-2 max-w-md text-gray-600">
+                You have not submitted any civic complaints yet. Once you
+                submit a complaint, it will appear here.
+              </p>
+
+              <Link
+                href="/citizen/complaint"
+                className="mt-6 inline-block rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-700"
+              >
+                Raise Your First Complaint
+              </Link>
+
+            </div>
+          )}
+
+          {/* Complaints */}
+          {!isLoading && !error && complaints.length > 0 && (
+            <div className="mt-6 space-y-5">
+
+              {complaints.map((complaint) => (
+                <div
+                  key={complaint._id}
+                  className="rounded-2xl border bg-white p-6 shadow-md"
+                >
+                  <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+
+                    <div className="flex-1">
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <h3 className="text-xl font-bold text-gray-900">
+                          {complaint.category}
+                        </h3>
+
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-bold ${
+                            complaint.status === "Resolved"
+                              ? "bg-green-100 text-green-700"
+                              : complaint.status === "In Progress"
+                              ? "bg-orange-100 text-orange-700"
+                              : complaint.status === "Verified"
+                              ? "bg-blue-100 text-blue-700"
+                              : complaint.status === "Assigned"
+                              ? "bg-purple-100 text-purple-700"
+                              : "bg-yellow-100 text-yellow-700"
+                          }`}
+                        >
+                          {complaint.status}
+                        </span>
+                      </div>
+
+                      <p className="mt-3 text-gray-700">
+                        {complaint.description}
+                      </p>
+
+                      {complaint.location?.address && (
+                        <div className="mt-4 flex items-start gap-2 text-sm text-gray-600">
+                          <span>📍</span>
+
+                          <span>
+                            {complaint.location.address}
+                          </span>
+                        </div>
+                      )}
+
+                      {complaint.landmark && (
+                        <p className="mt-2 text-sm text-gray-600">
+                          <span className="font-semibold">
+                            Landmark:
+                          </span>{" "}
+                          {complaint.landmark}
+                        </p>
+                      )}
+
+                      <p className="mt-4 text-xs text-gray-500">
+                        Submitted on{" "}
+                        {new Date(
+                          complaint.createdAt
+                        ).toLocaleString("en-IN")}
+                      </p>
+
+                    </div>
+
+                    {complaint.imageUrl && (
+                      <div className="w-full lg:w-48">
+                        <img
+                          src={complaint.imageUrl}
+                          alt="Complaint"
+                          className="h-36 w-full rounded-xl border object-cover"
+                        />
+                      </div>
+                    )}
+
+                  </div>
+                </div>
+              ))}
+
+            </div>
+          )}
 
         </section>
 
