@@ -141,12 +141,14 @@ export default function CitizenPortalLayout({
             </div>
           </div>
 
-          <button
-            onClick={handleLogout}
-            className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white hover:bg-red-700 transition"
+          {/* Profile */}
+          <Link
+            href="/citizen/profile"
+            className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border-2 border-blue-500 bg-blue-100 text-xl font-bold text-blue-600 hover:ring-4 hover:ring-blue-100 transition"
+            title="Profile"
           >
-            Logout
-          </button>
+            👤
+          </Link>
         </header>
 
         {/* Page Content */}

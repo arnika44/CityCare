@@ -150,6 +150,54 @@ export default function CitizenDashboard() {
           </div>
         </section>
 
+        {/* Recent Complaints */}
+        <section className="mt-10">
+
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900">
+                Recent Complaints
+              </h2>
+
+              <p className="mt-2 text-gray-700">
+                View your latest submitted complaints.
+              </p>
+            </div>
+
+            <Link
+              href="/citizen/complaints"
+              className="text-sm font-semibold text-blue-600 hover:text-blue-700"
+            >
+              View All
+            </Link>
+          </div>
+
+          <div className="mt-5 rounded-2xl border bg-white p-8 text-center shadow-md">
+
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 text-3xl">
+              📋
+            </div>
+
+            <h3 className="mt-4 text-lg font-bold text-gray-900">
+              No complaints yet
+            </h3>
+
+            <p className="mt-2 text-sm text-gray-600">
+              Your recent complaints will appear here after you submit a
+              complaint.
+            </p>
+
+            <Link
+              href="/citizen/complaint"
+              className="mt-5 inline-block rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+            >
+              Report a Problem
+            </Link>
+
+          </div>
+
+        </section>
+
       </div>
     </main>
   );
