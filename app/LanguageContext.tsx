@@ -33,6 +33,10 @@ const languageCodes: Record<string, string> = {
   Urdu: "ur",
 };
 
+function setGoogleTranslateCookie(languageCode: string) {
+  document.cookie = `googtrans=/en/${languageCode}; path=/`;
+}
+
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState("English");
 
@@ -42,25 +46,20 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
     setLanguageState(savedLanguage);
 
-    const languageCode = languageCodes[savedLanguage];
+    const languageCode = languageCodes[savedLanguage] || "en";
 
-    if (languageCode && languageCode !== "en") {
-      document.cookie = `googtrans=/en/${languageCode}; path=/`;
-    }
+    setGoogleTranslateCookie(languageCode);
   }, []);
 
   const setLanguage = (newLanguage: string) => {
-    setLanguageState(newLanguage);
+    const languageCode = languageCodes[newLanguage] || "en";
 
+    setLanguageState(newLanguage);
     localStorage.setItem("citycare-language", newLanguage);
 
-    const languageCode = languageCodes[newLanguage];
+    setGoogleTranslateCookie(languageCode);
 
-    if (languageCode === "en") {
-      document.cookie = "googtrans=/en/en; path=/";
-    } else {
-      document.cookie = `googtrans=/en/${languageCode}; path=/`;
-    }
+    window.location.reload();
   };
 
   return (

@@ -21,30 +21,13 @@ const languages = [
 export default function LanguagePage() {
   const { language, setLanguage } = useLanguage();
 
-  const changeLanguage = (languageName: string, languageCode: string) => {
+  const changeLanguage = (languageName: string) => {
     setLanguage(languageName);
-
-    const tryTranslate = () => {
-      const select = document.querySelector(
-        ".goog-te-combo"
-      ) as HTMLSelectElement | null;
-
-      if (!select) {
-        setTimeout(tryTranslate, 300);
-        return;
-      }
-
-      select.value = languageCode;
-      select.dispatchEvent(new Event("change"));
-    };
-
-    tryTranslate();
   };
 
   return (
     <main className="px-6 py-10">
       <div className="mx-auto w-full max-w-5xl">
-
         <div className="mb-8">
           <h2 className="text-3xl font-bold text-gray-900">
             Language
@@ -56,7 +39,6 @@ export default function LanguagePage() {
         </div>
 
         <div className="rounded-2xl border bg-white p-8 shadow-md">
-
           <div className="rounded-xl border border-blue-200 bg-blue-50 p-5">
             <p className="text-sm font-semibold text-gray-700">
               Current Language
@@ -86,9 +68,7 @@ export default function LanguagePage() {
                 <button
                   key={item.code}
                   type="button"
-                  onClick={() =>
-                    changeLanguage(item.name, item.code)
-                  }
+                  onClick={() => changeLanguage(item.name)}
                   className={`rounded-xl border p-5 text-left transition ${
                     selected
                       ? "border-blue-600 bg-blue-50 ring-2 ring-blue-200"
@@ -96,7 +76,6 @@ export default function LanguagePage() {
                   }`}
                 >
                   <div className="flex items-center justify-between">
-
                     <div>
                       <p className="text-lg font-bold text-gray-900">
                         {item.native}
@@ -112,7 +91,6 @@ export default function LanguagePage() {
                         ✓
                       </span>
                     )}
-
                   </div>
                 </button>
               );
@@ -125,7 +103,6 @@ export default function LanguagePage() {
               CityCare website.
             </p>
           </div>
-
         </div>
       </div>
     </main>
