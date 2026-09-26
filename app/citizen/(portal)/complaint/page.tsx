@@ -4,6 +4,8 @@ import { useRef, useState } from "react";
 
 export default function ComplaintPage() {
   const [image, setImage] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+
   const [category, setCategory] = useState("");
   const [description, setDescription] = useState("");
   const [isListening, setIsListening] = useState(false);
@@ -19,6 +21,7 @@ export default function ComplaintPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const handleImageUpload = (
     event: React.ChangeEvent<HTMLInputElement>
@@ -26,6 +29,8 @@ export default function ComplaintPage() {
     const file = event.target.files?.[0];
 
     if (!file) return;
+
+    setImageFile(file);
 
     const imageUrl = URL.createObjectURL(file);
     setImage(imageUrl);
@@ -35,11 +40,20 @@ export default function ComplaintPage() {
     fileInputRef.current?.click();
   };
 
+  const handleTakePhoto = () => {
+    cameraInputRef.current?.click();
+  };
+
   const handleRemovePhoto = () => {
     setImage(null);
+    setImageFile(null);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
+    }
+
+    if (cameraInputRef.current) {
+      cameraInputRef.current.value = "";
     }
   };
 
@@ -173,8 +187,8 @@ export default function ComplaintPage() {
   };
 
   const handleSubmit = async () => {
-    if (!image) {
-      alert("Please upload a photo of the problem.");
+    if (!imageFile) {
+      alert("Please upload or take a photo of the problem.");
       return;
     }
 
@@ -201,6 +215,32 @@ export default function ComplaintPage() {
     setIsSubmitting(true);
 
     try {
+      /*
+       * Step 1:
+       * Upload selected image to Cloudinary
+       */
+      const formData = new FormData();
+      formData.append("file", imageFile);
+
+      const uploadResponse = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const uploadData = await uploadResponse.json();
+
+      if (!uploadResponse.ok || !uploadData.success) {
+        throw new Error(
+          uploadData.message || "Failed to upload complaint image."
+        );
+      }
+
+      const cloudinaryImageUrl = uploadData.imageUrl;
+
+      /*
+       * Step 2:
+       * Get citizen ID
+       */
       let citizenId = localStorage.getItem("citycare_citizen_id");
 
       if (!citizenId) {
@@ -208,6 +248,10 @@ export default function ComplaintPage() {
         localStorage.setItem("citycare_citizen_id", citizenId);
       }
 
+      /*
+       * Step 3:
+       * Save complaint with Cloudinary image URL
+       */
       const response = await fetch("/api/complaints", {
         method: "POST",
         headers: {
@@ -217,7 +261,7 @@ export default function ComplaintPage() {
           citizenId,
           category,
           description: description.trim(),
-          imageUrl: "",
+          imageUrl: cloudinaryImageUrl,
           location: {
             latitude,
             longitude,
@@ -239,6 +283,7 @@ export default function ComplaintPage() {
       alert("Complaint submitted successfully.");
 
       setImage(null);
+      setImageFile(null);
       setCategory("");
       setDescription("");
       setLocation("");
@@ -250,6 +295,10 @@ export default function ComplaintPage() {
 
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
+      }
+
+      if (cameraInputRef.current) {
+        cameraInputRef.current.value = "";
       }
     } catch (error) {
       console.error("Complaint submission error:", error);
@@ -291,36 +340,48 @@ export default function ComplaintPage() {
           </p>
 
           {!image ? (
-            <div
-              onClick={handleChoosePhoto}
-              className="mt-6 flex min-h-[320px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-blue-300 bg-blue-50 px-6 text-center transition hover:bg-blue-100"
-            >
-              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-blue-100 text-4xl">
-                📷
+            <div className="mt-6 rounded-2xl border-2 border-dashed border-blue-300 bg-blue-50 p-8">
+
+              <div className="flex flex-col items-center justify-center text-center">
+
+                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-blue-100 text-4xl">
+                  📷
+                </div>
+
+                <h4 className="mt-5 text-lg font-bold text-gray-900">
+                  Add a Photo
+                </h4>
+
+                <p className="mt-2 text-sm text-gray-600">
+                  Take a new photo or choose an existing photo from your device.
+                </p>
+
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+
+                  <button
+                    type="button"
+                    onClick={handleTakePhoto}
+                    className="rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-700"
+                  >
+                    📷 Take Photo
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleChoosePhoto}
+                    className="rounded-lg border border-blue-300 bg-white px-6 py-3 font-semibold text-blue-700 transition hover:bg-blue-50"
+                  >
+                    🖼️ Upload Photo
+                  </button>
+
+                </div>
+
+                <p className="mt-4 text-xs text-gray-500">
+                  JPG, JPEG or PNG
+                </p>
+
               </div>
 
-              <h4 className="mt-5 text-lg font-bold text-gray-900">
-                Upload a Photo
-              </h4>
-
-              <p className="mt-2 text-sm text-gray-600">
-                Click here to select a photo from your device
-              </p>
-
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleChoosePhoto();
-                }}
-                className="mt-5 rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-700"
-              >
-                Choose Photo
-              </button>
-
-              <p className="mt-4 text-xs text-gray-500">
-                JPG, JPEG or PNG
-              </p>
             </div>
           ) : (
             <div className="mt-6">
@@ -336,12 +397,21 @@ export default function ComplaintPage() {
 
               {/* Photo Actions */}
               <div className="mt-5 flex flex-wrap gap-3">
+
+                <button
+                  type="button"
+                  onClick={handleTakePhoto}
+                  className="rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+                >
+                  📷 Take New Photo
+                </button>
+
                 <button
                   type="button"
                   onClick={handleChoosePhoto}
-                  className="rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+                  className="rounded-lg border border-blue-300 bg-white px-5 py-2.5 font-semibold text-blue-700 transition hover:bg-blue-50"
                 >
-                  Change Photo
+                  🖼️ Choose Photo
                 </button>
 
                 <button
@@ -351,16 +421,27 @@ export default function ComplaintPage() {
                 >
                   Remove Photo
                 </button>
+
               </div>
 
             </div>
           )}
 
-          {/* Hidden File Input */}
+          {/* Upload Existing Photo */}
           <input
             ref={fileInputRef}
             type="file"
             accept="image/png, image/jpeg, image/jpg"
+            onChange={handleImageUpload}
+            className="hidden"
+          />
+
+          {/* Take Photo Using Camera */}
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
             onChange={handleImageUpload}
             className="hidden"
           />
@@ -512,7 +593,6 @@ export default function ComplaintPage() {
 
           <div className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-5">
 
-            {/* Location Header */}
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 
               <div className="flex items-start gap-3">
@@ -546,7 +626,6 @@ export default function ComplaintPage() {
 
             </div>
 
-            {/* Detected Location */}
             {location && (
               <div className="mt-5 rounded-xl border border-green-200 bg-white p-4">
 
@@ -570,7 +649,6 @@ export default function ComplaintPage() {
 
                 </div>
 
-                {/* Add Location Details */}
                 <button
                   type="button"
                   onClick={() =>
@@ -583,11 +661,9 @@ export default function ComplaintPage() {
                     : "+ Add Location Details"}
                 </button>
 
-                {/* Extra Location Details */}
                 {showLocationDetails && (
                   <div className="mt-4 space-y-4 border-t pt-4">
 
-                    {/* Landmark */}
                     <div>
                       <label
                         htmlFor="landmark"
@@ -608,7 +684,6 @@ export default function ComplaintPage() {
                       />
                     </div>
 
-                    {/* More About Location */}
                     <div>
                       <label
                         htmlFor="locationDetails"
