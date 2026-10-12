@@ -14,16 +14,37 @@ export interface IComplaint extends Document {
   citizenId: string;
   category: string;
   description: string;
+
   imageUrl?: string;
+
   location: {
     latitude: number;
     longitude: number;
     address?: string;
   };
+
   landmark?: string;
   locationDetails?: string;
-  status: "Reported" | "Verified" | "Assigned" | "In Progress" | "Resolved";
+
+  department?:
+    | "PWD"
+    | "Water"
+    | "Electricity"
+    | "Sanitation"
+    | "Traffic";
+
+  assignedAdminId?: string;
+  assignedAdminName?: string;
+
+  status:
+    | "Reported"
+    | "Verified"
+    | "Assigned"
+    | "In Progress"
+    | "Resolved";
+
   statusHistory: IStatusHistory[];
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -82,10 +103,12 @@ const ComplaintSchema = new Schema<IComplaint>(
         type: Number,
         required: true,
       },
+
       longitude: {
         type: Number,
         required: true,
       },
+
       address: {
         type: String,
         default: "",
@@ -98,6 +121,27 @@ const ComplaintSchema = new Schema<IComplaint>(
     },
 
     locationDetails: {
+      type: String,
+      default: "",
+    },
+
+    department: {
+      type: String,
+      enum: [
+        "PWD",
+        "Water",
+        "Electricity",
+        "Sanitation",
+        "Traffic",
+      ],
+    },
+
+    assignedAdminId: {
+      type: String,
+      default: "",
+    },
+
+    assignedAdminName: {
       type: String,
       default: "",
     },
@@ -126,6 +170,7 @@ const ComplaintSchema = new Schema<IComplaint>(
       },
     },
   },
+
   {
     timestamps: true,
   }
