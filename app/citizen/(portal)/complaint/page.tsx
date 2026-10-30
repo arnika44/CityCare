@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-export default function ComplaintPage() {
+function ComplaintForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -77,9 +77,6 @@ export default function ComplaintPage() {
           return;
         }
 
-        /*
-         * Fill existing complaint data
-         */
         setCategory(complaint.category || "");
         setDescription(complaint.description || "");
 
@@ -87,11 +84,13 @@ export default function ComplaintPage() {
         setImageFile(null);
 
         setLocation(complaint.location?.address || "");
+
         setLatitude(
           typeof complaint.location?.latitude === "number"
             ? complaint.location.latitude
             : null
         );
+
         setLongitude(
           typeof complaint.location?.longitude === "number"
             ? complaint.location.longitude
@@ -286,12 +285,6 @@ export default function ComplaintPage() {
   };
 
   const handleSubmit = async () => {
-    /*
-     * In normal mode photo is required.
-     *
-     * In edit mode an existing photo can remain unchanged,
-     * so a new image file is not required.
-     */
     if (!isEditMode && !imageFile) {
       alert("Please upload or take a photo of the problem.");
       return;
@@ -325,9 +318,6 @@ export default function ComplaintPage() {
     setIsSubmitting(true);
 
     try {
-      /*
-       * Get citizen ID
-       */
       let citizenId = localStorage.getItem("citycare_citizen_id");
 
       if (!citizenId) {
@@ -335,15 +325,6 @@ export default function ComplaintPage() {
         localStorage.setItem("citycare_citizen_id", citizenId);
       }
 
-      /*
-       * Image URL
-       *
-       * If user selected a new image:
-       * upload it to Cloudinary.
-       *
-       * If user did not select a new image:
-       * keep the existing image URL.
-       */
       let cloudinaryImageUrl = image || "";
 
       if (imageFile) {
@@ -438,9 +419,6 @@ export default function ComplaintPage() {
 
       alert("Complaint submitted successfully.");
 
-      /*
-       * Clear the complaint form
-       */
       setImage(null);
       setImageFile(null);
       setCategory("");
@@ -460,9 +438,6 @@ export default function ComplaintPage() {
         cameraInputRef.current.value = "";
       }
 
-      /*
-       * Open My Complaints automatically
-       */
       router.push("/citizen/complaints");
     } catch (error) {
       console.error("Complaint submission error:", error);
@@ -930,5 +905,24 @@ export default function ComplaintPage() {
 
       </div>
     </main>
+  );
+}
+
+/*
+ * Suspense boundary fixes the useSearchParams prerendering error.
+ */
+export default function ComplaintPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="px-6 py-10">
+          <div className="mx-auto max-w-4xl text-center">
+            Loading Complaint Form...
+          </div>
+        </main>
+      }
+    >
+      <ComplaintForm />
+    </Suspense>
   );
 }
