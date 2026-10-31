@@ -2,6 +2,9 @@
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/mongodb";
 import Complaint from "@/models/Complaint";
+import Notification from "@/models/notification";
+
+export const dynamic = "force-dynamic";
 
 const ADMIN_STATUSES = [
   "Reported",
@@ -21,6 +24,34 @@ const VALID_DEPARTMENTS = [
 type Context = {
   params: Promise<{ id: string }>;
 };
+
+type NotificationType =
+  | "STATUS_UPDATE"
+  | "COMPLAINT_ASSIGNED"
+  | "COMPLAINT_RESOLVED";
+
+// Create notification without interrupting complaint updates
+async function createCitizenNotification(
+  citizenId: string,
+  complaintId: string,
+  title: string,
+  message: string,
+  type: NotificationType
+) {
+  try {
+    if (!citizenId) return;
+
+    await Notification.create({
+      citizenId,
+      complaintId,
+      title,
+      message,
+      type,
+    });
+  } catch (error) {
+    console.error("Notification creation error:", error);
+  }
+}
 
 export async function GET(request: Request, { params }: Context) {
   try {
@@ -134,6 +165,20 @@ export async function PATCH(request: Request, { params }: Context) {
 
       await complaint.save();
 
+      await createCitizenNotification(
+        complaint.citizenId,
+        complaint._id.toString(),
+        citizenAction === "confirm"
+          ? "Complaint Resolved"
+          : "Complaint Reopened",
+        citizenAction === "confirm"
+          ? "Your complaint has been confirmed as resolved."
+          : "Your complaint has been moved back to In Progress.",
+        citizenAction === "confirm"
+          ? "COMPLAINT_RESOLVED"
+          : "STATUS_UPDATE"
+      );
+
       return NextResponse.json(
         {
           success: true,
@@ -187,6 +232,14 @@ export async function PATCH(request: Request, { params }: Context) {
 
       await complaint.save();
 
+      await createCitizenNotification(
+        complaint.citizenId,
+        complaint._id.toString(),
+        "Action Required",
+        "The department has submitted completed work. Please verify your complaint.",
+        "STATUS_UPDATE"
+      );
+
       return NextResponse.json(
         {
           success: true,
@@ -217,7 +270,6 @@ export async function PATCH(request: Request, { params }: Context) {
       );
     }
 
-    // Admin cannot directly mark a complaint as Resolved
     if (status === "Resolved") {
       return NextResponse.json(
         {
@@ -262,6 +314,15 @@ export async function PATCH(request: Request, { params }: Context) {
       );
     }
 
+    const previousStatus = complaint.status;
+
+    const assignmentChanged =
+      (department !== undefined && department !== complaint.department) ||
+      (assignedAdminId !== undefined &&
+        assignedAdminId !== complaint.assignedAdminId) ||
+      (assignedAdminName !== undefined &&
+        assignedAdminName !== complaint.assignedAdminName);
+
     if (department) {
       complaint.department = department;
     }
@@ -297,6 +358,21 @@ export async function PATCH(request: Request, { params }: Context) {
     }
 
     await complaint.save();
+
+    if (complaint.status !== previousStatus || assignmentChanged) {
+      const isAssigned =
+        complaint.status === "Assigned" || assignmentChanged;
+
+      await createCitizenNotification(
+        complaint.citizenId,
+        complaint._id.toString(),
+        isAssigned ? "Complaint Assigned" : "Complaint Status Updated",
+        isAssigned
+          ? `Your complaint has been assigned to ${complaint.department || "a department"}.`
+          : `Your complaint status has been updated to ${complaint.status}.`,
+        isAssigned ? "COMPLAINT_ASSIGNED" : "STATUS_UPDATE"
+      );
+    }
 
     return NextResponse.json(
       {
