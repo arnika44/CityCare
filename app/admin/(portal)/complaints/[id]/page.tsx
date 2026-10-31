@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -31,6 +30,12 @@ interface Complaint {
   citizenPhone?: string;
   citizenEmail?: string;
   category: string;
+  reportedCategory?: string;
+  aiVerifiedCategory?: string;
+  aiVerificationStatus?: "Pending" | "Verified" | "Manual Review" | "Failed";
+  aiConfidence?: number;
+  aiReason?: string;
+  aiVerifiedAt?: string;
   description: string;
   imageUrl?: string;
   location?: {
@@ -407,6 +412,99 @@ export default function AdminComplaintDetailsPage() {
             </h3>
           </div>
         </div>
+
+        {/* AI COMPLAINT VERIFICATION */}
+        <section className="rounded-2xl border border-blue-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">
+                Gemini AI Analysis
+              </p>
+              <h2 className="mt-2 text-xl font-extrabold text-slate-900">
+                AI Complaint Verification
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                AI checks the citizen-selected category using the complaint
+                description and uploaded photo.
+              </p>
+            </div>
+
+            <span
+              className={`inline-flex w-fit rounded-full px-3 py-1.5 text-xs font-bold ${
+                complaint.aiVerificationStatus === "Verified"
+                  ? "bg-green-100 text-green-700"
+                  : complaint.aiVerificationStatus === "Manual Review"
+                    ? "bg-amber-100 text-amber-700"
+                    : complaint.aiVerificationStatus === "Failed"
+                      ? "bg-red-100 text-red-700"
+                      : "bg-slate-100 text-slate-700"
+              }`}
+            >
+              {complaint.aiVerificationStatus || "Not available"}
+            </span>
+          </div>
+
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Citizen Selected Category
+              </p>
+              <p className="mt-2 text-lg font-extrabold text-slate-800">
+                {complaint.reportedCategory || complaint.category || "Not available"}
+              </p>
+            </div>
+
+            <div className="rounded-xl bg-blue-50 p-4">
+              <p className="text-xs font-bold uppercase tracking-wider text-blue-500">
+                AI Detected Category
+              </p>
+              <p className="mt-2 text-lg font-extrabold text-blue-800">
+                {complaint.aiVerifiedCategory || "Not detected"}
+              </p>
+            </div>
+
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                AI Confidence
+              </p>
+              <p className="mt-2 text-lg font-extrabold text-slate-800">
+                {typeof complaint.aiConfidence === "number"
+                  ? `${(complaint.aiConfidence * 100).toFixed(1)}%`
+                  : "Not available"}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-xl border border-slate-100 p-4">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              AI Analysis / Reason
+            </p>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+              {complaint.aiReason || "No AI analysis is available for this complaint."}
+            </p>
+          </div>
+
+          {complaint.aiVerifiedAt && (
+            <p className="mt-3 text-xs text-slate-500">
+              AI checked on: {formatDate(complaint.aiVerifiedAt)}
+            </p>
+          )}
+
+          {complaint.aiVerificationStatus === "Manual Review" && (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">
+              AI could not verify this complaint with sufficient confidence.
+              Please review the photo and description manually before assigning
+              a department.
+            </div>
+          )}
+
+          {complaint.aiVerificationStatus === "Failed" && (
+            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-700">
+              AI verification could not be completed. Check the server logs and
+              AI configuration. Please review this complaint manually.
+            </div>
+          )}
+        </section>
 
         <div className="grid items-start gap-6 xl:grid-cols-3">
 
