@@ -1,13 +1,11 @@
+
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/mongodb";
-import Complaint from "@/models/Complaint";
-
-type Department =
-  | "PWD"
-  | "Water"
-  | "Electricity"
-  | "Sanitation"
-  | "Traffic";
+import Complaint, {
+  type Department,
+  type AIVerificationStatus,
+} from "@/models/Complaint";
+import { analyzeComplaint } from "@/lib/gemini";
 
 const departmentMap: Record<string, Department> = {
   Pothole: "PWD",
@@ -16,15 +14,31 @@ const departmentMap: Record<string, Department> = {
 
   Waterlogging: "Water",
   "Water Leakage": "Water",
+  "Water Supply": "Water",
 
   Streetlight: "Electricity",
+  Electricity: "Electricity",
 
   Garbage: "Sanitation",
   Sewage: "Sanitation",
   "Illegal Dumping": "Sanitation",
+  Waste: "Sanitation",
 
   Traffic: "Traffic",
 };
+
+function isValidCloudinaryImageUrl(imageUrl: string) {
+  try {
+    const url = new URL(imageUrl);
+
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "res.cloudinary.com"
+    );
+  } catch {
+    return false;
+  }
+}
 
 function validateComplaintDetails(body: any) {
   const {
@@ -59,9 +73,19 @@ function validateComplaintDetails(body: any) {
     return "Please enter a valid email address.";
   }
 
-  const hasLatitude = location.latitude !== null &&
+  if (
+    typeof imageUrl !== "string" ||
+    !isValidCloudinaryImageUrl(imageUrl)
+  ) {
+    return "Please provide a valid Cloudinary complaint image.";
+  }
+
+  const hasLatitude =
+    location.latitude !== null &&
     location.latitude !== undefined;
-  const hasLongitude = location.longitude !== null &&
+
+  const hasLongitude =
+    location.longitude !== null &&
     location.longitude !== undefined;
 
   if (hasLatitude !== hasLongitude) {
@@ -77,6 +101,62 @@ function validateComplaintDetails(body: any) {
   }
 
   return null;
+}
+
+async function verifyComplaintWithAI(
+  reportedCategory: string,
+  description: string,
+  imageUrl: string
+) {
+  try {
+    const analysis = await analyzeComplaint(
+      description,
+      imageUrl,
+      reportedCategory
+    );
+
+    const department =
+      departmentMap[analysis.verifiedCategory];
+
+    const needsManualReview =
+      analysis.needsManualReview || !department;
+
+    return {
+      category: needsManualReview
+        ? reportedCategory
+        : analysis.verifiedCategory,
+
+      reportedCategory,
+
+      aiVerifiedCategory: analysis.verifiedCategory,
+
+      aiVerificationStatus: (
+        needsManualReview ? "Manual Review" : "Verified"
+      ) as AIVerificationStatus,
+
+      aiConfidence: analysis.confidence,
+      aiReason: analysis.reason,
+      aiVerifiedAt: new Date(),
+
+      department: needsManualReview
+        ? undefined
+        : department,
+    };
+  } catch (error) {
+    console.error("Gemini Complaint Verification Error:", error);
+
+    return {
+      category: reportedCategory,
+      reportedCategory,
+      aiVerifiedCategory: "",
+      aiVerificationStatus: "Failed" as AIVerificationStatus,
+      aiConfidence: undefined,
+      aiReason:
+        "AI verification could not be completed. Manual review is required.",
+      aiVerifiedAt: undefined,
+      department: undefined,
+    };
+  }
 }
 
 export async function GET(request: Request) {
@@ -100,7 +180,9 @@ export async function GET(request: Request) {
 
     const complaints = isAdmin
       ? await Complaint.find({}).sort({ createdAt: -1 }).lean()
-      : await Complaint.find({ citizenId }).sort({ createdAt: -1 }).lean();
+      : await Complaint.find({ citizenId })
+          .sort({ createdAt: -1 })
+          .lean();
 
     return NextResponse.json(
       {
@@ -163,16 +245,25 @@ export async function POST(request: Request) {
       );
     }
 
-    const department = departmentMap[category] || undefined;
+    // Analyze the complaint photo and description using Gemini.
+    const aiVerification = await verifyComplaintWithAI(
+      category,
+      description.trim(),
+      imageUrl
+    );
 
     const complaint = await Complaint.create({
       citizenId,
+
       citizenName: citizenName.trim(),
       citizenPhone: citizenPhone.trim(),
       citizenEmail: citizenEmail.trim().toLowerCase(),
-      category,
+
+      ...aiVerification,
+
       description: description.trim(),
       imageUrl,
+
       location: {
         address: location.address.trim(),
         ...(typeof location.latitude === "number"
@@ -182,16 +273,22 @@ export async function POST(request: Request) {
           ? { longitude: location.longitude }
           : {}),
       },
+
       landmark: landmark || "",
       locationDetails: locationDetails || "",
-      ...(department ? { department } : {}),
+
       status: "Reported",
     });
+
+    const message =
+      aiVerification.aiVerificationStatus === "Verified"
+        ? "Complaint submitted and AI verified successfully."
+        : "Complaint submitted successfully. It requires manual verification before department assignment.";
 
     return NextResponse.json(
       {
         success: true,
-        message: "Complaint submitted successfully.",
+        message,
         complaint,
       },
       { status: 201 }
@@ -282,11 +379,29 @@ export async function PUT(request: Request) {
       );
     }
 
+    // Re-run AI verification whenever a complaint is edited.
+    const aiVerification = await verifyComplaintWithAI(
+      category,
+      description.trim(),
+      imageUrl
+    );
+
+    const previousDepartment = complaint.department;
+
     complaint.citizenName = citizenName.trim();
     complaint.citizenPhone = citizenPhone.trim();
     complaint.citizenEmail = citizenEmail.trim().toLowerCase();
 
-    complaint.category = category;
+    complaint.category = aiVerification.category;
+    complaint.reportedCategory = aiVerification.reportedCategory;
+    complaint.aiVerifiedCategory =
+      aiVerification.aiVerifiedCategory;
+    complaint.aiVerificationStatus =
+      aiVerification.aiVerificationStatus;
+    complaint.aiConfidence = aiVerification.aiConfidence;
+    complaint.aiReason = aiVerification.aiReason;
+    complaint.aiVerifiedAt = aiVerification.aiVerifiedAt;
+
     complaint.description = description.trim();
     complaint.imageUrl = imageUrl;
 
@@ -303,12 +418,21 @@ export async function PUT(request: Request) {
     complaint.landmark = landmark || "";
     complaint.locationDetails = locationDetails || "";
 
-    const department = departmentMap[category];
+    complaint.department = aiVerification.department;
 
-    if (department) {
-      complaint.department = department;
-    } else {
-      complaint.department = undefined;
+    // If the department changes, the previous admin assignment
+    // is no longer considered valid.
+    if (previousDepartment !== aiVerification.department) {
+      complaint.assignedAdminId = "";
+      complaint.assignedAdminName = "";
+
+      if (complaint.status !== "Reported") {
+        complaint.status = "Reported";
+        complaint.statusHistory.push({
+          status: "Reported",
+          timestamp: new Date(),
+        });
+      }
     }
 
     await complaint.save();
@@ -316,7 +440,10 @@ export async function PUT(request: Request) {
     return NextResponse.json(
       {
         success: true,
-        message: "Complaint updated successfully.",
+        message:
+          aiVerification.aiVerificationStatus === "Verified"
+            ? "Complaint updated and AI verified successfully."
+            : "Complaint updated. Manual verification is required.",
         complaint,
       },
       { status: 200 }
