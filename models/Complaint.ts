@@ -1,4 +1,3 @@
-
 import mongoose, { Schema, Document } from "mongoose";
 
 export type ComplaintStatus =
@@ -16,14 +15,22 @@ export interface IStatusHistory {
 
 export interface IComplaint extends Document {
   citizenId: string;
+
+  // Citizen details captured at complaint submission
+  citizenName?: string;
+  citizenPhone?: string;
+  citizenEmail?: string;
+
   category: string;
   description: string;
   imageUrl?: string;
+
   location: {
-    latitude: number;
-    longitude: number;
+    latitude?: number;
+    longitude?: number;
     address?: string;
   };
+
   landmark?: string;
   locationDetails?: string;
 
@@ -71,14 +78,19 @@ const StatusHistorySchema = new Schema<IStatusHistory>(
 const ComplaintSchema = new Schema<IComplaint>(
   {
     citizenId: { type: String, required: true },
+
+    citizenName: { type: String, trim: true, default: "" },
+    citizenPhone: { type: String, trim: true, default: "" },
+    citizenEmail: { type: String, lowercase: true, trim: true, default: "" },
+
     category: { type: String, required: true },
     description: { type: String, required: true },
     imageUrl: { type: String },
 
     location: {
-      latitude: { type: Number, required: true },
-      longitude: { type: Number, required: true },
-      address: { type: String },
+      latitude: { type: Number },
+      longitude: { type: Number },
+      address: { type: String, required: true },
     },
 
     landmark: { type: String },

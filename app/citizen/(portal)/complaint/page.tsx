@@ -1,3 +1,4 @@
+
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -17,6 +18,10 @@ function ComplaintForm() {
   const [image, setImage] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
 
+  const [citizenName, setCitizenName] = useState("");
+  const [citizenPhone, setCitizenPhone] = useState("");
+  const [citizenEmail, setCitizenEmail] = useState("");
+
   const [category, setCategory] = useState("");
   const [description, setDescription] = useState("");
   const [isListening, setIsListening] = useState(false);
@@ -24,6 +29,7 @@ function ComplaintForm() {
   const [location, setLocation] = useState("");
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
+  const [locationMode, setLocationMode] = useState<"gps" | "manual">("gps");
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [showLocationDetails, setShowLocationDetails] = useState(false);
   const [landmark, setLandmark] = useState("");
@@ -35,13 +41,17 @@ function ComplaintForm() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  /*
-   * Load existing complaint when Edit mode is opened
-   */
+  // Prefill available citizen information for a new complaint.
   useEffect(() => {
-    if (!isEditMode || !editComplaintId) {
-      return;
-    }
+    if (isEditMode) return;
+
+    setCitizenName(localStorage.getItem("citycare_citizen_name") || "");
+    setCitizenEmail(localStorage.getItem("citycare_citizen_email") || "");
+  }, [isEditMode]);
+
+  // Load existing complaint when Edit mode is opened.
+  useEffect(() => {
+    if (!isEditMode || !editComplaintId) return;
 
     const loadComplaint = async () => {
       setIsLoadingComplaint(true);
@@ -62,9 +72,7 @@ function ComplaintForm() {
         const data = await response.json();
 
         if (!response.ok || !data.success) {
-          throw new Error(
-            data.message || "Failed to load complaint."
-          );
+          throw new Error(data.message || "Failed to load complaint.");
         }
 
         const complaint = data.complaints?.find(
@@ -77,6 +85,10 @@ function ComplaintForm() {
           return;
         }
 
+        setCitizenName(complaint.citizenName || "");
+        setCitizenPhone(complaint.citizenPhone || "");
+        setCitizenEmail(complaint.citizenEmail || "");
+
         setCategory(complaint.category || "");
         setDescription(complaint.description || "");
 
@@ -85,16 +97,23 @@ function ComplaintForm() {
 
         setLocation(complaint.location?.address || "");
 
-        setLatitude(
+        const savedLatitude =
           typeof complaint.location?.latitude === "number"
             ? complaint.location.latitude
-            : null
-        );
+            : null;
 
-        setLongitude(
+        const savedLongitude =
           typeof complaint.location?.longitude === "number"
             ? complaint.location.longitude
-            : null
+            : null;
+
+        setLatitude(savedLatitude);
+        setLongitude(savedLongitude);
+
+        setLocationMode(
+          savedLatitude !== null && savedLongitude !== null
+            ? "gps"
+            : "manual"
         );
 
         setLandmark(complaint.landmark || "");
@@ -146,13 +165,8 @@ function ComplaintForm() {
     setImage(null);
     setImageFile(null);
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-
-    if (cameraInputRef.current) {
-      cameraInputRef.current.value = "";
-    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (cameraInputRef.current) cameraInputRef.current.value = "";
   };
 
   const handleVoiceInput = () => {
@@ -183,9 +197,7 @@ function ComplaintForm() {
     recognition.continuous = false;
     recognition.interimResults = false;
 
-    recognition.onstart = () => {
-      setIsListening(true);
-    };
+    recognition.onstart = () => setIsListening(true);
 
     recognition.onresult = (event: any) => {
       const spokenText = event.results[0][0].transcript;
@@ -195,15 +207,26 @@ function ComplaintForm() {
       );
     };
 
-    recognition.onerror = () => {
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
 
     recognition.start();
+  };
+
+  const handleSelectManualLocation = () => {
+    setLocationMode("manual");
+    setLocation("");
+    setLatitude(null);
+    setLongitude(null);
+    setIsGettingLocation(false);
+  };
+
+  const handleSelectGpsLocation = () => {
+    setLocationMode("gps");
+    setLocation("");
+    setLatitude(null);
+    setLongitude(null);
+    setIsGettingLocation(false);
   };
 
   const handleGetLocation = () => {
@@ -212,6 +235,7 @@ function ComplaintForm() {
       return;
     }
 
+    setLocationMode("gps");
     setIsGettingLocation(true);
     setLocation("");
     setLatitude(null);
@@ -235,7 +259,6 @@ function ComplaintForm() {
           }
 
           const data = await response.json();
-
           const address = data.address || {};
 
           const parts = [
@@ -285,6 +308,21 @@ function ComplaintForm() {
   };
 
   const handleSubmit = async () => {
+    if (!citizenName.trim()) {
+      alert("Please enter your full name.");
+      return;
+    }
+
+    if (!/^[0-9]{10}$/.test(citizenPhone.trim())) {
+      alert("Please enter a valid 10-digit phone number.");
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(citizenEmail.trim())) {
+      alert("Please enter a valid email address.");
+      return;
+    }
+
     if (!isEditMode && !imageFile) {
       alert("Please upload or take a photo of the problem.");
       return;
@@ -305,13 +343,16 @@ function ComplaintForm() {
       return;
     }
 
-    if (!location) {
+    if (!location.trim()) {
       alert("Please provide the problem location.");
       return;
     }
 
-    if (latitude === null || longitude === null) {
-      alert("Please detect your current location again.");
+    if (
+      locationMode === "gps" &&
+      (latitude === null || longitude === null)
+    ) {
+      alert("Please detect your current location or enter the address manually.");
       return;
     }
 
@@ -347,9 +388,27 @@ function ComplaintForm() {
         cloudinaryImageUrl = uploadData.imageUrl;
       }
 
-      /*
-       * EDIT MODE
-       */
+      const complaintPayload = {
+        citizenId,
+        citizenName: citizenName.trim(),
+        citizenPhone: citizenPhone.trim(),
+        citizenEmail: citizenEmail.trim().toLowerCase(),
+        category,
+        description: description.trim(),
+        imageUrl: cloudinaryImageUrl,
+        location: {
+          address: location.trim(),
+          ...(locationMode === "gps" &&
+          latitude !== null &&
+          longitude !== null
+            ? { latitude, longitude }
+            : {}),
+        },
+        landmark: landmark.trim(),
+        locationDetails: locationDetails.trim(),
+      };
+
+      // EDIT MODE
       if (isEditMode && editComplaintId) {
         const response = await fetch("/api/complaints", {
           method: "PUT",
@@ -357,86 +416,56 @@ function ComplaintForm() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
+            ...complaintPayload,
             complaintId: editComplaintId,
-            citizenId,
-            category,
-            description: description.trim(),
-            imageUrl: cloudinaryImageUrl,
-            location: {
-              latitude,
-              longitude,
-              address: location,
-            },
-            landmark: landmark.trim(),
-            locationDetails: locationDetails.trim(),
           }),
         });
 
         const data = await response.json();
 
         if (!response.ok || !data.success) {
-          throw new Error(
-            data.message || "Failed to update complaint."
-          );
+          throw new Error(data.message || "Failed to update complaint.");
         }
 
         alert("Complaint updated successfully.");
-
         router.push("/citizen/complaints");
         return;
       }
 
-      /*
-       * NORMAL CREATE MODE
-       */
+      // NORMAL CREATE MODE
       const response = await fetch("/api/complaints", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          citizenId,
-          category,
-          description: description.trim(),
-          imageUrl: cloudinaryImageUrl,
-          location: {
-            latitude,
-            longitude,
-            address: location,
-          },
-          landmark: landmark.trim(),
-          locationDetails: locationDetails.trim(),
-        }),
+        body: JSON.stringify(complaintPayload),
       });
 
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(
-          data.message || "Failed to submit complaint."
-        );
+        throw new Error(data.message || "Failed to submit complaint.");
       }
 
       alert("Complaint submitted successfully.");
 
       setImage(null);
       setImageFile(null);
+      setCitizenName("");
+      setCitizenPhone("");
+      setCitizenEmail("");
       setCategory("");
       setDescription("");
       setLocation("");
       setLatitude(null);
       setLongitude(null);
+      setLocationMode("gps");
       setLandmark("");
       setLocationDetails("");
       setShowLocationDetails(false);
 
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-
-      if (cameraInputRef.current) {
-        cameraInputRef.current.value = "";
-      }
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (cameraInputRef.current) cameraInputRef.current.value = "";
 
       router.push("/citizen/complaints");
     } catch (error) {
@@ -452,20 +481,15 @@ function ComplaintForm() {
     }
   };
 
-  /*
-   * Loading screen while existing complaint is being loaded
-   */
   if (isEditMode && isLoadingComplaint) {
     return (
       <main className="px-6 py-10">
         <div className="mx-auto flex min-h-[400px] w-full max-w-4xl items-center justify-center">
           <div className="rounded-2xl border bg-white px-8 py-10 text-center shadow-md">
             <div className="text-4xl">⏳</div>
-
             <h2 className="mt-4 text-xl font-bold text-gray-900">
               Loading Complaint...
             </h2>
-
             <p className="mt-2 text-sm text-gray-600">
               Please wait while we load your complaint details.
             </p>
@@ -492,9 +516,79 @@ function ComplaintForm() {
           </p>
         </div>
 
+        {/* Citizen Details */}
+        <section className="mt-8 rounded-2xl border bg-white p-8 shadow-md">
+          <h3 className="text-xl font-bold text-gray-900">
+            Citizen Details
+          </h3>
+
+          <p className="mt-2 text-gray-600">
+            Enter your contact information for this complaint.
+          </p>
+
+          <div className="mt-6 grid gap-5 sm:grid-cols-2">
+            <div>
+              <label
+                htmlFor="citizenName"
+                className="block text-sm font-semibold text-gray-900"
+              >
+                Full Name *
+              </label>
+
+              <input
+                id="citizenName"
+                type="text"
+                value={citizenName}
+                onChange={(event) => setCitizenName(event.target.value)}
+                placeholder="Enter your full name"
+                className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-3 text-gray-900 outline-none placeholder:text-gray-400 transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="citizenPhone"
+                className="block text-sm font-semibold text-gray-900"
+              >
+                Phone Number *
+              </label>
+
+              <input
+                id="citizenPhone"
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                value={citizenPhone}
+                onChange={(event) =>
+                  setCitizenPhone(event.target.value.replace(/\D/g, ""))
+                }
+                placeholder="Enter 10-digit phone number"
+                className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-3 text-gray-900 outline-none placeholder:text-gray-400 transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label
+                htmlFor="citizenEmail"
+                className="block text-sm font-semibold text-gray-900"
+              >
+                Email Address *
+              </label>
+
+              <input
+                id="citizenEmail"
+                type="email"
+                value={citizenEmail}
+                onChange={(event) => setCitizenEmail(event.target.value)}
+                placeholder="Enter your email address"
+                className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-3 text-gray-900 outline-none placeholder:text-gray-400 transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+          </div>
+        </section>
+
         {/* Photo Upload Card */}
         <section className="mt-8 rounded-2xl border bg-white p-8 shadow-md">
-
           <h3 className="text-xl font-bold text-gray-900">
             Upload Problem Photo
           </h3>
@@ -505,9 +599,7 @@ function ComplaintForm() {
 
           {!image ? (
             <div className="mt-6 rounded-2xl border-2 border-dashed border-blue-300 bg-blue-50 p-8">
-
               <div className="flex flex-col items-center justify-center text-center">
-
                 <div className="flex h-20 w-20 items-center justify-center rounded-full bg-blue-100 text-4xl">
                   📷
                 </div>
@@ -521,7 +613,6 @@ function ComplaintForm() {
                 </p>
 
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-
                   <button
                     type="button"
                     onClick={handleTakePhoto}
@@ -537,20 +628,15 @@ function ComplaintForm() {
                   >
                     🖼️ Upload Photo
                   </button>
-
                 </div>
 
                 <p className="mt-4 text-xs text-gray-500">
                   JPG, JPEG or PNG
                 </p>
-
               </div>
-
             </div>
           ) : (
             <div className="mt-6">
-
-              {/* Image Preview */}
               <div className="overflow-hidden rounded-2xl border bg-gray-50">
                 <img
                   src={image}
@@ -559,9 +645,7 @@ function ComplaintForm() {
                 />
               </div>
 
-              {/* Photo Actions */}
               <div className="mt-5 flex flex-wrap gap-3">
-
                 <button
                   type="button"
                   onClick={handleTakePhoto}
@@ -585,13 +669,10 @@ function ComplaintForm() {
                 >
                   Remove Photo
                 </button>
-
               </div>
-
             </div>
           )}
 
-          {/* Upload Existing Photo */}
           <input
             ref={fileInputRef}
             type="file"
@@ -600,7 +681,6 @@ function ComplaintForm() {
             className="hidden"
           />
 
-          {/* Take Photo Using Camera */}
           <input
             ref={cameraInputRef}
             type="file"
@@ -609,12 +689,10 @@ function ComplaintForm() {
             onChange={handleImageUpload}
             className="hidden"
           />
-
         </section>
 
         {/* Problem Details */}
         <section className="mt-8 rounded-2xl border bg-white p-8 shadow-md">
-
           <h3 className="text-xl font-bold text-gray-900">
             Problem Details
           </h3>
@@ -623,7 +701,6 @@ function ComplaintForm() {
             Tell us what kind of civic problem you are reporting.
           </p>
 
-          {/* Problem Category */}
           <div className="mt-6">
             <label
               htmlFor="category"
@@ -638,59 +715,22 @@ function ComplaintForm() {
               onChange={(event) => setCategory(event.target.value)}
               className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             >
-              <option value="">
-                Select a problem category
-              </option>
-
-              <option value="Pothole">
-                Pothole / Road Damage
-              </option>
-
-              <option value="Garbage">
-                Garbage / Waste
-              </option>
-
-              <option value="Waterlogging">
-                Waterlogging
-              </option>
-
-              <option value="Water Leakage">
-                Water Leakage
-              </option>
-
-              <option value="Streetlight">
-                Broken Streetlight
-              </option>
-
-              <option value="Open Drain">
-                Open Drain
-              </option>
-
-              <option value="Sewage">
-                Sewage Problem
-              </option>
-
-              <option value="Traffic">
-                Traffic Problem
-              </option>
-
-              <option value="Illegal Dumping">
-                Illegal Dumping
-              </option>
-
-              <option value="Stray Animals">
-                Stray Animals
-              </option>
-
-              <option value="Other">
-                Other
-              </option>
+              <option value="">Select a problem category</option>
+              <option value="Pothole">Pothole / Road Damage</option>
+              <option value="Garbage">Garbage / Waste</option>
+              <option value="Waterlogging">Waterlogging</option>
+              <option value="Water Leakage">Water Leakage</option>
+              <option value="Streetlight">Broken Streetlight</option>
+              <option value="Open Drain">Open Drain</option>
+              <option value="Sewage">Sewage Problem</option>
+              <option value="Traffic">Traffic Problem</option>
+              <option value="Illegal Dumping">Illegal Dumping</option>
+              <option value="Stray Animals">Stray Animals</option>
+              <option value="Other">Other</option>
             </select>
           </div>
 
-          {/* Problem Description */}
           <div className="mt-6">
-
             <label
               htmlFor="description"
               className="block text-sm font-semibold text-gray-900"
@@ -699,19 +739,15 @@ function ComplaintForm() {
             </label>
 
             <div className="relative mt-2">
-
               <textarea
                 id="description"
                 value={description}
-                onChange={(event) =>
-                  setDescription(event.target.value)
-                }
+                onChange={(event) => setDescription(event.target.value)}
                 placeholder="Describe the problem in detail..."
                 rows={5}
                 className="w-full resize-none rounded-lg border border-gray-300 px-4 py-3 pr-16 text-gray-900 outline-none placeholder:text-gray-400 transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               />
 
-              {/* Mic Button */}
               <button
                 type="button"
                 onClick={handleVoiceInput}
@@ -726,7 +762,6 @@ function ComplaintForm() {
                   {isListening ? "🔴" : "🎙️"}
                 </span>
               </button>
-
             </div>
 
             <p className="mt-2 text-xs text-gray-500">
@@ -738,158 +773,217 @@ function ComplaintForm() {
                 Listening... Please speak clearly.
               </p>
             )}
-
           </div>
-
         </section>
 
         {/* Problem Location */}
         <section className="mt-8 rounded-2xl border bg-white p-8 shadow-md">
-
           <h3 className="text-xl font-bold text-gray-900">
             Problem Location
           </h3>
 
           <p className="mt-2 text-gray-600">
-            Let CityCare detect the location where the problem is being
-            reported.
+            Choose your current location or enter the problem address manually.
           </p>
 
-          <div className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-5">
-
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-
-              <div className="flex items-start gap-3">
-
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xl">
-                  📍
-                </div>
-
-                <div>
-                  <h4 className="font-semibold text-gray-900">
-                    Use Current Location
-                  </h4>
-
-                  <p className="mt-1 text-sm text-gray-600">
-                    Your current address will be detected automatically.
-                  </p>
-                </div>
-
+          {/* Location Options */}
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={handleSelectGpsLocation}
+              className={`rounded-xl border-2 p-5 text-left transition ${
+                locationMode === "gps"
+                  ? "border-blue-500 bg-blue-50"
+                  : "border-gray-200 bg-white hover:border-blue-300"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">📍</span>
+                <span className="font-semibold text-gray-900">
+                  Use Current Location
+                </span>
               </div>
 
-              <button
-                type="button"
-                onClick={handleGetLocation}
-                disabled={isGettingLocation}
-                className="shrink-0 rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isGettingLocation
-                  ? "Detecting Location..."
-                  : "Use My Location"}
-              </button>
+              <p className="mt-2 text-sm text-gray-600">
+                Detect the problem location using GPS.
+              </p>
+            </button>
 
-            </div>
+            <button
+              type="button"
+              onClick={handleSelectManualLocation}
+              className={`rounded-xl border-2 p-5 text-left transition ${
+                locationMode === "manual"
+                  ? "border-blue-500 bg-blue-50"
+                  : "border-gray-200 bg-white hover:border-blue-300"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">✍️</span>
+                <span className="font-semibold text-gray-900">
+                  Enter Address Manually
+                </span>
+              </div>
 
-            {location && (
-              <div className="mt-5 rounded-xl border border-green-200 bg-white p-4">
+              <p className="mt-2 text-sm text-gray-600">
+                Enter the address of the place where the problem exists.
+              </p>
+            </button>
+          </div>
 
+          {/* GPS Location */}
+          {locationMode === "gps" && (
+            <div className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-start gap-3">
-
-                  <div className="mt-0.5 text-xl">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xl">
                     📍
                   </div>
 
-                  <div className="min-w-0 flex-1">
+                  <div>
+                    <h4 className="font-semibold text-gray-900">
+                      Use Current Location
+                    </h4>
 
-                    <p className="text-sm font-semibold text-green-700">
-                      Location Detected
+                    <p className="mt-1 text-sm text-gray-600">
+                      Your current address will be detected automatically.
                     </p>
-
-                    <p className="mt-1 text-sm leading-6 text-gray-700">
-                      {location}
-                    </p>
-
                   </div>
-
                 </div>
 
                 <button
                   type="button"
-                  onClick={() =>
-                    setShowLocationDetails(!showLocationDetails)
-                  }
-                  className="mt-4 text-sm font-semibold text-blue-600 hover:text-blue-700"
+                  onClick={handleGetLocation}
+                  disabled={isGettingLocation}
+                  className="shrink-0 rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {showLocationDetails
-                    ? "− Hide Location Details"
-                    : "+ Add Location Details"}
+                  {isGettingLocation
+                    ? "Detecting Location..."
+                    : latitude !== null
+                    ? "Detect Again"
+                    : "Use My Location"}
                 </button>
+              </div>
 
-                {showLocationDetails && (
-                  <div className="mt-4 space-y-4 border-t pt-4">
+              {location && (
+                <div className="mt-5 rounded-xl border border-green-200 bg-white p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 text-xl">📍</div>
 
-                    <div>
-                      <label
-                        htmlFor="landmark"
-                        className="block text-sm font-semibold text-gray-900"
-                      >
-                        Landmark / Nearby Place
-                      </label>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-green-700">
+                        Location Detected
+                      </p>
 
-                      <input
-                        id="landmark"
-                        type="text"
-                        value={landmark}
-                        onChange={(event) =>
-                          setLandmark(event.target.value)
-                        }
-                        placeholder="e.g. Near ABC School, opposite City Mall"
-                        className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-3 text-sm text-gray-900 outline-none placeholder:text-gray-400 transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                      />
-                    </div>
-
-                    <div>
-                      <label
-                        htmlFor="locationDetails"
-                        className="block text-sm font-semibold text-gray-900"
-                      >
-                        More About This Location
-                      </label>
-
-                      <textarea
-                        id="locationDetails"
-                        value={locationDetails}
-                        onChange={(event) =>
-                          setLocationDetails(event.target.value)
-                        }
-                        placeholder="Add any extra detail that can help identify the exact spot..."
-                        rows={3}
-                        className="mt-2 w-full resize-none rounded-lg border border-gray-300 px-4 py-3 text-sm text-gray-900 outline-none placeholder:text-gray-400 transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                      />
-
-                      <p className="mt-1 text-xs text-gray-500">
-                        Example: Near the main gate, beside the park,
-                        opposite the bus stop, etc.
+                      <p className="mt-1 text-sm leading-6 text-gray-700">
+                        {location}
                       </p>
                     </div>
-
                   </div>
-                )}
+                </div>
+              )}
+            </div>
+          )}
 
+          {/* Manual Address */}
+          {locationMode === "manual" && (
+            <div className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-5">
+              <label
+                htmlFor="manualAddress"
+                className="block text-sm font-semibold text-gray-900"
+              >
+                Enter Problem Address *
+              </label>
+
+              <textarea
+                id="manualAddress"
+                value={location}
+                onChange={(event) => {
+                  setLocation(event.target.value);
+                  setLatitude(null);
+                  setLongitude(null);
+                }}
+                placeholder="Enter house number, street, area, city, district, state and PIN code..."
+                rows={4}
+                className="mt-2 w-full resize-none rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm text-gray-900 outline-none placeholder:text-gray-400 transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+
+              <p className="mt-2 text-xs text-gray-600">
+                Enter the exact place where the civic problem is located.
+                GPS permission is not required for a manual address.
+              </p>
+            </div>
+          )}
+
+          {/* Additional Location Details */}
+          <div className="mt-5">
+            <button
+              type="button"
+              onClick={() =>
+                setShowLocationDetails(!showLocationDetails)
+              }
+              className="text-sm font-semibold text-blue-600 hover:text-blue-700"
+            >
+              {showLocationDetails
+                ? "− Hide Additional Location Details"
+                : "+ Add Landmark / Additional Details"}
+            </button>
+
+            {showLocationDetails && (
+              <div className="mt-4 space-y-4 rounded-xl border bg-white p-5">
+                <div>
+                  <label
+                    htmlFor="landmark"
+                    className="block text-sm font-semibold text-gray-900"
+                  >
+                    Landmark / Nearby Place
+                  </label>
+
+                  <input
+                    id="landmark"
+                    type="text"
+                    value={landmark}
+                    onChange={(event) => setLandmark(event.target.value)}
+                    placeholder="e.g. Near ABC School, opposite City Mall"
+                    className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-3 text-sm text-gray-900 outline-none placeholder:text-gray-400 transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="locationDetails"
+                    className="block text-sm font-semibold text-gray-900"
+                  >
+                    More About This Location
+                  </label>
+
+                  <textarea
+                    id="locationDetails"
+                    value={locationDetails}
+                    onChange={(event) =>
+                      setLocationDetails(event.target.value)
+                    }
+                    placeholder="Add any extra detail that can help identify the exact spot..."
+                    rows={3}
+                    className="mt-2 w-full resize-none rounded-lg border border-gray-300 px-4 py-3 text-sm text-gray-900 outline-none placeholder:text-gray-400 transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+
+                  <p className="mt-1 text-xs text-gray-500">
+                    Example: Near the main gate, beside the park,
+                    opposite the bus stop, etc.
+                  </p>
+                </div>
               </div>
             )}
-
           </div>
-
         </section>
 
         {/* Submit Complaint */}
         <div className="mt-8 flex justify-end">
-
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={isSubmitting}
+            disabled={isSubmitting || isGettingLocation}
             className="rounded-xl bg-blue-600 px-8 py-3.5 text-base font-bold text-white shadow-md transition hover:bg-blue-700 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSubmitting
@@ -900,9 +994,7 @@ function ComplaintForm() {
               ? "Update Complaint"
               : "Submit Complaint"}
           </button>
-
         </div>
-
       </div>
     </main>
   );

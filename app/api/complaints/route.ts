@@ -1,4 +1,3 @@
-
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/mongodb";
 import Complaint from "@/models/Complaint";
@@ -26,6 +25,59 @@ const departmentMap: Record<string, Department> = {
 
   Traffic: "Traffic",
 };
+
+function validateComplaintDetails(body: any) {
+  const {
+    citizenName,
+    citizenPhone,
+    citizenEmail,
+    category,
+    description,
+    imageUrl,
+    location,
+  } = body;
+
+  if (
+    !citizenName?.trim() ||
+    !citizenPhone?.trim() ||
+    !citizenEmail?.trim() ||
+    !category ||
+    !description?.trim() ||
+    !imageUrl ||
+    !location?.address?.trim()
+  ) {
+    return "Please provide name, phone, email, photo, category, description and complaint address.";
+  }
+
+  if (!/^[0-9]{10}$/.test(citizenPhone.trim())) {
+    return "Please enter a valid 10-digit phone number.";
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  if (!emailRegex.test(citizenEmail.trim())) {
+    return "Please enter a valid email address.";
+  }
+
+  const hasLatitude = location.latitude !== null &&
+    location.latitude !== undefined;
+  const hasLongitude = location.longitude !== null &&
+    location.longitude !== undefined;
+
+  if (hasLatitude !== hasLongitude) {
+    return "Both latitude and longitude must be provided together.";
+  }
+
+  if (
+    hasLatitude &&
+    (typeof location.latitude !== "number" ||
+      typeof location.longitude !== "number")
+  ) {
+    return "Invalid GPS coordinates.";
+  }
+
+  return null;
+}
 
 export async function GET(request: Request) {
   try {
@@ -78,6 +130,9 @@ export async function POST(request: Request) {
 
     const {
       citizenId,
+      citizenName,
+      citizenPhone,
+      citizenEmail,
       category,
       description,
       imageUrl,
@@ -86,19 +141,23 @@ export async function POST(request: Request) {
       locationDetails,
     } = body;
 
-    if (
-      !citizenId ||
-      !category ||
-      !description?.trim() ||
-      !imageUrl ||
-      !location?.address ||
-      typeof location.latitude !== "number" ||
-      typeof location.longitude !== "number"
-    ) {
+    if (!citizenId) {
       return NextResponse.json(
         {
           success: false,
-          message: "Please provide all required complaint details.",
+          message: "Citizen ID is required. Please login again.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const validationError = validateComplaintDetails(body);
+
+    if (validationError) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: validationError,
         },
         { status: 400 }
       );
@@ -108,10 +167,21 @@ export async function POST(request: Request) {
 
     const complaint = await Complaint.create({
       citizenId,
+      citizenName: citizenName.trim(),
+      citizenPhone: citizenPhone.trim(),
+      citizenEmail: citizenEmail.trim().toLowerCase(),
       category,
       description: description.trim(),
       imageUrl,
-      location,
+      location: {
+        address: location.address.trim(),
+        ...(typeof location.latitude === "number"
+          ? { latitude: location.latitude }
+          : {}),
+        ...(typeof location.longitude === "number"
+          ? { longitude: location.longitude }
+          : {}),
+      },
       landmark: landmark || "",
       locationDetails: locationDetails || "",
       ...(department ? { department } : {}),
@@ -151,6 +221,9 @@ export async function PUT(request: Request) {
     const {
       complaintId,
       citizenId,
+      citizenName,
+      citizenPhone,
+      citizenEmail,
       category,
       description,
       imageUrl,
@@ -169,18 +242,13 @@ export async function PUT(request: Request) {
       );
     }
 
-    if (
-      !category ||
-      !description?.trim() ||
-      !imageUrl ||
-      !location?.address ||
-      typeof location.latitude !== "number" ||
-      typeof location.longitude !== "number"
-    ) {
+    const validationError = validateComplaintDetails(body);
+
+    if (validationError) {
       return NextResponse.json(
         {
           success: false,
-          message: "Please provide all required complaint details.",
+          message: validationError,
         },
         { status: 400 }
       );
@@ -214,10 +282,24 @@ export async function PUT(request: Request) {
       );
     }
 
+    complaint.citizenName = citizenName.trim();
+    complaint.citizenPhone = citizenPhone.trim();
+    complaint.citizenEmail = citizenEmail.trim().toLowerCase();
+
     complaint.category = category;
     complaint.description = description.trim();
     complaint.imageUrl = imageUrl;
-    complaint.location = location;
+
+    complaint.location = {
+      address: location.address.trim(),
+      ...(typeof location.latitude === "number"
+        ? { latitude: location.latitude }
+        : {}),
+      ...(typeof location.longitude === "number"
+        ? { longitude: location.longitude }
+        : {}),
+    };
+
     complaint.landmark = landmark || "";
     complaint.locationDetails = locationDetails || "";
 

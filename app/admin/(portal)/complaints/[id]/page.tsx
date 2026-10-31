@@ -27,6 +27,9 @@ interface StatusHistory {
 interface Complaint {
   _id: string;
   citizenId: string;
+  citizenName?: string;
+  citizenPhone?: string;
+  citizenEmail?: string;
   category: string;
   description: string;
   imageUrl?: string;
@@ -50,18 +53,6 @@ interface Complaint {
   citizenVerifiedAt?: string;
   createdAt: string;
   updatedAt: string;
-}
-
-interface Citizen {
-  citizenId: string;
-  name?: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  pinCode?: string;
-  cityDistrict?: string;
-  state?: string;
-  profileImage?: string;
 }
 
 const STATUSES: ComplaintStatus[] = [
@@ -133,8 +124,6 @@ export default function AdminComplaintDetailsPage() {
   const id = params.id as string;
 
   const [complaint, setComplaint] = useState<Complaint | null>(null);
-  const [citizen, setCitizen] = useState<Citizen | null>(null);
-  const [citizenLoading, setCitizenLoading] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -173,29 +162,6 @@ export default function AdminComplaintDetailsPage() {
       setSelectedAdmin(item.assignedAdminId || "");
       setSelectedStatus(item.status);
       setResolutionDescription(item.resolutionDescription || "");
-
-      // Fetch citizen's registered profile
-      setCitizenLoading(true);
-      setCitizen(null);
-
-      try {
-        const citizenResponse = await fetch(
-          `/api/citizen/profile?citizenId=${encodeURIComponent(
-            item.citizenId
-          )}`,
-          { cache: "no-store" }
-        );
-
-        const citizenData = await citizenResponse.json();
-
-        if (citizenResponse.ok) {
-          setCitizen(citizenData.user || citizenData);
-        }
-      } catch (citizenError) {
-        console.error("Unable to fetch citizen information:", citizenError);
-      } finally {
-        setCitizenLoading(false);
-      }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Something went wrong."
@@ -455,130 +421,74 @@ export default function AdminComplaintDetailsPage() {
                 </h2>
 
                 <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">
-                  Registered Citizen
+                  Complaint Contact Details
                 </span>
               </div>
 
-              {citizenLoading ? (
-                <p className="mt-5 text-sm font-medium text-slate-500">
-                  Loading citizen information...
-                </p>
-              ) : citizen ? (
-                <div className="mt-6 space-y-5">
+              <div className="mt-6 grid gap-5 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    Citizen Name
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-slate-800">
+                    {complaint.citizenName || "Not provided"}
+                  </p>
+                </div>
 
-                  {citizen.profileImage && (
-                    <img
-                      src={citizen.profileImage}
-                      alt="Citizen profile"
-                      className="h-20 w-20 rounded-full border-2 border-blue-100 object-cover"
-                    />
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    Phone Number
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-slate-800">
+                    {complaint.citizenPhone || "Not provided"}
+                  </p>
+
+                  {complaint.citizenPhone && (
+                    <a
+                      href={`tel:${complaint.citizenPhone}`}
+                      className="mt-2 inline-block text-sm font-bold text-blue-600 hover:text-blue-700"
+                    >
+                      Call Citizen
+                    </a>
                   )}
-
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        Citizen Name
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-slate-800">
-                        {citizen.name || "Not provided"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        Phone Number
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-slate-800">
-                        {citizen.phone || "Not provided"}
-                      </p>
-
-                      {citizen.phone && (
-                        <a
-                          href={`tel:${citizen.phone}`}
-                          className="mt-2 inline-block text-sm font-bold text-blue-600 hover:text-blue-700"
-                        >
-                          Call Citizen
-                        </a>
-                      )}
-                    </div>
-
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        Email Address
-                      </p>
-                      <p className="mt-1 break-all text-sm font-semibold text-slate-800">
-                        {citizen.email || "Not provided"}
-                      </p>
-
-                      {citizen.email && (
-                        <a
-                          href={`mailto:${citizen.email}`}
-                          className="mt-2 inline-block text-sm font-bold text-blue-600 hover:text-blue-700"
-                        >
-                          Send Email
-                        </a>
-                      )}
-                    </div>
-
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        PIN Code
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-slate-800">
-                        {citizen.pinCode || "Not provided"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        City / District
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-slate-800">
-                        {citizen.cityDistrict || "Not provided"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        State
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-slate-800">
-                        {citizen.state || "Not provided"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-slate-100 pt-5">
-                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                      Registered Address
-                    </p>
-                    <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700">
-                      {citizen.address || "Address not provided in profile."}
-                    </p>
-                  </div>
-
-                  <div className="border-t border-slate-100 pt-5">
-                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                      Citizen ID
-                    </p>
-                    <p className="mt-1 break-all text-sm font-semibold text-slate-700">
-                      {complaint.citizenId}
-                    </p>
-                  </div>
                 </div>
-              ) : (
-                <div className="mt-5 rounded-xl bg-amber-50 p-4">
-                  <p className="text-sm font-semibold text-amber-800">
-                    Citizen profile information is not available.
+
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    Email Address
                   </p>
-                  <p className="mt-1 break-all text-xs text-amber-700">
-                    Citizen ID: {complaint.citizenId}
+                  <p className="mt-1 break-all text-sm font-semibold text-slate-800">
+                    {complaint.citizenEmail || "Not provided"}
                   </p>
-                  <p className="mt-2 text-xs text-amber-700">
-                    The citizen may need to register and complete their profile.
+
+                  {complaint.citizenEmail && (
+                    <a
+                      href={`mailto:${complaint.citizenEmail}`}
+                      className="mt-2 inline-block text-sm font-bold text-blue-600 hover:text-blue-700"
+                    >
+                      Send Email
+                    </a>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    Citizen ID
+                  </p>
+                  <p className="mt-1 break-all text-sm font-semibold text-slate-700">
+                    {complaint.citizenId}
                   </p>
                 </div>
-              )}
+              </div>
+
+              <div className="mt-6 border-t border-slate-100 pt-5">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Complaint Address
+                </p>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                  {complaint.location?.address || "Address not provided"}
+                </p>
+              </div>
             </section>
 
             {/* COMPLAINT INFORMATION */}
