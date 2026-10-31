@@ -178,6 +178,7 @@ async function verifyComplaintWithAI(
   }
 }
 
+// GET: Fetch citizen complaints or all complaints for admin.
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -223,6 +224,7 @@ export async function GET(request: Request) {
   }
 }
 
+// POST: Create a new complaint.
 export async function POST(request: Request) {
   try {
     await connectToDatabase();
@@ -264,7 +266,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Analyze the complaint photo and description using Gemini.
     const aiVerification = await verifyComplaintWithAI(
       category,
       description.trim(),
@@ -328,6 +329,87 @@ export async function POST(request: Request) {
   }
 }
 
+// DELETE: A citizen can delete only their own complaint.
+export async function DELETE(request: Request) {
+  try {
+    const body = await request.json();
+
+    const { complaintId, citizenId } = body;
+
+    if (!complaintId || !citizenId) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Complaint ID and Citizen ID are required.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
+      typeof complaintId !== "string" ||
+      !/^[a-f\d]{24}$/i.test(complaintId)
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid complaint ID.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (typeof citizenId !== "string" || !citizenId.trim()) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid Citizen ID.",
+        },
+        { status: 400 }
+      );
+    }
+
+    await connectToDatabase();
+
+    // Both IDs must match. A citizen cannot delete another
+    // citizen's complaint by changing the complaint ID.
+    const deletedComplaint = await Complaint.findOneAndDelete({
+      _id: complaintId,
+      citizenId: citizenId.trim(),
+    });
+
+    if (!deletedComplaint) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Complaint not found or you are not authorized to delete it.",
+        },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        message: "Complaint deleted successfully.",
+      },
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error("Complaint Delete API Error:", error);
+
+    return NextResponse.json(
+      {
+        success: false,
+        message: "Failed to delete complaint.",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+// PUT: Update an existing complaint.
 export async function PUT(request: Request) {
   try {
     await connectToDatabase();
@@ -398,7 +480,6 @@ export async function PUT(request: Request) {
       );
     }
 
-    // Re-run AI verification whenever a complaint is edited.
     const aiVerification = await verifyComplaintWithAI(
       category,
       description.trim(),
@@ -439,8 +520,6 @@ export async function PUT(request: Request) {
 
     complaint.department = aiVerification.department;
 
-    // If the department changes, the previous admin assignment
-    // is no longer considered valid.
     if (previousDepartment !== aiVerification.department) {
       complaint.assignedAdminId = "";
       complaint.assignedAdminName = "";
