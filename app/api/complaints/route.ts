@@ -1,5 +1,6 @@
 
 import { NextResponse } from "next/server";
+
 import { connectToDatabase } from "@/lib/mongodb";
 import Complaint, {
   type Department,
@@ -103,6 +104,22 @@ function validateComplaintDetails(body: any) {
   return null;
 }
 
+// Safely extract the actual AI error without exposing API keys.
+function getAIErrorMessage(error: unknown): string {
+  let message =
+    error instanceof Error
+      ? error.message
+      : String(error);
+
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (apiKey) {
+    message = message.split(apiKey).join("[REDACTED]");
+  }
+
+  return message.slice(0, 500);
+}
+
 async function verifyComplaintWithAI(
   reportedCategory: string,
   description: string,
@@ -143,7 +160,10 @@ async function verifyComplaintWithAI(
         : department,
     };
   } catch (error) {
-    console.error("Gemini Complaint Verification Error:", error);
+    console.error(
+      "Gemini Complaint Verification Error:",
+      error
+    );
 
     return {
       category: reportedCategory,
@@ -151,8 +171,7 @@ async function verifyComplaintWithAI(
       aiVerifiedCategory: "",
       aiVerificationStatus: "Failed" as AIVerificationStatus,
       aiConfidence: undefined,
-      aiReason:
-        "AI verification could not be completed. Manual review is required.",
+      aiReason: getAIErrorMessage(error),
       aiVerifiedAt: undefined,
       department: undefined,
     };
