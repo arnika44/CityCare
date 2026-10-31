@@ -1,9 +1,8 @@
-
 "use client";
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 
 type Status =
   | "Reported"
@@ -103,8 +102,8 @@ function getStateFromAddress(address: string) {
     "jammu & kashmir": "jammu and kashmir",
     "nct of delhi": "delhi",
     "new delhi": "delhi",
-    "orissa": "odisha",
-    "uttaranchal": "uttarakhand",
+    orissa: "odisha",
+    uttaranchal: "uttarakhand",
   };
 
   for (const alias of Object.keys(aliases)) {
@@ -152,6 +151,7 @@ function getDepartmentKey(category: string) {
 
 export default function ComplaintDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const complaintId = params.id as string;
 
   const [complaint, setComplaint] = useState<Complaint | null>(null);
@@ -164,6 +164,10 @@ export default function ComplaintDetailPage() {
     null
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Three-dot menu and delete state
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const fetchComplaint = useCallback(async () => {
     try {
@@ -213,6 +217,61 @@ export default function ComplaintDetailPage() {
   useEffect(() => {
     if (complaintId) fetchComplaint();
   }, [complaintId, fetchComplaint]);
+
+  // Open the existing Edit Complaint form
+  const handleEditComplaint = () => {
+    setIsMenuOpen(false);
+    router.push(`/citizen/complaint?edit=${encodeURIComponent(complaintId)}`);
+  };
+
+  // Delete complaint
+  const handleDeleteComplaint = async () => {
+    if (!complaint || !citizenId) {
+      alert("Citizen information not found. Please login again.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this complaint? This action cannot be undone."
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setIsDeleting(true);
+      setIsMenuOpen(false);
+
+      const response = await fetch("/api/complaints", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          complaintId: complaint._id,
+          citizenId,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || "Failed to delete complaint.");
+      }
+
+      alert("Complaint deleted successfully.");
+      router.push("/citizen/complaints");
+    } catch (error) {
+      console.error("Delete complaint error:", error);
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while deleting the complaint."
+      );
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const getHistoryTimestamp = (status: Status) => {
     return (
@@ -361,13 +420,62 @@ export default function ComplaintDetailPage() {
           ← Back to My Complaints
         </Link>
 
-        <div className="mt-6">
-          <h1 className="text-3xl font-bold text-gray-900">
-            Complaint Details
-          </h1>
-          <p className="mt-2 text-gray-600">
-            View complete information and track the progress of your complaint.
-          </p>
+        {/* Page Header with Three Dots Menu */}
+        <div className="mt-6 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">
+              Complaint Details
+            </h1>
+            <p className="mt-2 text-gray-600">
+              View complete information and track the progress of your complaint.
+            </p>
+          </div>
+
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsMenuOpen((previous) => !previous)}
+              disabled={isDeleting}
+              aria-label="Complaint options"
+              aria-expanded={isMenuOpen}
+              className="flex h-11 w-11 items-center justify-center rounded-xl border border-gray-300 bg-white text-2xl font-bold text-gray-700 shadow-sm transition hover:bg-gray-100 disabled:opacity-50"
+            >
+              ⋮
+            </button>
+
+            {isMenuOpen && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Close menu"
+                  onClick={() => setIsMenuOpen(false)}
+                  className="fixed inset-0 z-10 cursor-default"
+                />
+
+                <div className="absolute right-0 top-12 z-20 w-56 overflow-hidden rounded-xl border border-gray-200 bg-white py-2 shadow-xl">
+                  <button
+                    type="button"
+                    onClick={handleEditComplaint}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-gray-700 transition hover:bg-blue-50 hover:text-blue-700"
+                  >
+                    <span className="text-lg">✏️</span>
+                    Edit Complaint
+                  </button>
+
+                  <div className="border-t border-gray-100" />
+
+                  <button
+                    type="button"
+                    onClick={handleDeleteComplaint}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-red-600 transition hover:bg-red-50"
+                  >
+                    <span className="text-lg">🗑️</span>
+                    Delete Complaint
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Complaint Information */}
