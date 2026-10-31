@@ -3,6 +3,30 @@ import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/mongodb";
 import Complaint from "@/models/Complaint";
 
+type Department =
+  | "PWD"
+  | "Water"
+  | "Electricity"
+  | "Sanitation"
+  | "Traffic";
+
+const departmentMap: Record<string, Department> = {
+  Pothole: "PWD",
+  "Road Damage": "PWD",
+  "Open Drain": "PWD",
+
+  Waterlogging: "Water",
+  "Water Leakage": "Water",
+
+  Streetlight: "Electricity",
+
+  Garbage: "Sanitation",
+  Sewage: "Sanitation",
+  "Illegal Dumping": "Sanitation",
+
+  Traffic: "Traffic",
+};
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -80,6 +104,8 @@ export async function POST(request: Request) {
       );
     }
 
+    const department = departmentMap[category] || undefined;
+
     const complaint = await Complaint.create({
       citizenId,
       category,
@@ -88,6 +114,7 @@ export async function POST(request: Request) {
       location,
       landmark: landmark || "",
       locationDetails: locationDetails || "",
+      ...(department ? { department } : {}),
       status: "Reported",
     });
 
@@ -193,6 +220,14 @@ export async function PUT(request: Request) {
     complaint.location = location;
     complaint.landmark = landmark || "";
     complaint.locationDetails = locationDetails || "";
+
+    const department = departmentMap[category];
+
+    if (department) {
+      complaint.department = department;
+    } else {
+      complaint.department = undefined;
+    }
 
     await complaint.save();
 

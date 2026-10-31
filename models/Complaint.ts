@@ -1,3 +1,4 @@
+
 import mongoose, { Schema, Document } from "mongoose";
 
 export type ComplaintStatus =
@@ -86,7 +87,7 @@ const ComplaintSchema = new Schema<IComplaint>(
     department: {
       type: String,
       enum: ["PWD", "Water", "Electricity", "Sanitation", "Traffic"],
-      default: "",
+      default: undefined,
     },
 
     assignedAdminId: { type: String, default: "" },
