@@ -1,81 +1,94 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-const STATUSES = [
-  "Reported",
-  "Verified",
-  "Assigned",
-  "In Progress",
-  "Resolved",
-] as const;
+type ComplaintStatus =
+  | "Reported"
+  | "Verified"
+  | "Assigned"
+  | "In Progress"
+  | "Awaiting Citizen Verification"
+  | "Resolved";
 
-const DEPARTMENTS = [
-  "PWD",
-  "Water",
-  "Electricity",
-  "Sanitation",
-  "Traffic",
-] as const;
+type Department =
+  | "PWD"
+  | "Water"
+  | "Electricity"
+  | "Sanitation"
+  | "Traffic";
 
-const DEPARTMENT_ADMINS: Record<
-  string,
-  { id: string; name: string }
-> = {
-  PWD: { id: "pwd-admin", name: "PWD Department Admin" },
-  Water: { id: "water-admin", name: "Water Department Admin" },
-  Electricity: {
-    id: "electricity-admin",
-    name: "Electricity Department Admin",
-  },
-  Sanitation: {
-    id: "sanitation-admin",
-    name: "Sanitation Department Admin",
-  },
-  Traffic: {
-    id: "traffic-admin",
-    name: "Traffic Department Admin",
-  },
-};
+interface StatusHistory {
+  status: ComplaintStatus;
+  timestamp: string;
+}
 
-type Complaint = {
+interface Complaint {
   _id: string;
   citizenId: string;
   category: string;
   description: string;
   imageUrl?: string;
-  location: {
-    latitude: number;
-    longitude: number;
+  location?: {
+    latitude?: number;
+    longitude?: number;
     address?: string;
   };
   landmark?: string;
   locationDetails?: string;
-  status: string;
-  department?: string;
+  department?: Department | "";
   assignedAdminId?: string;
   assignedAdminName?: string;
-  statusHistory: {
-    status: string;
-    timestamp: string;
-  }[];
+  status: ComplaintStatus;
+  statusHistory: StatusHistory[];
+  resolutionDescription?: string;
+  resolutionSubmittedAt?: string;
+  citizenResolutionStatus?: "Pending" | "Confirmed" | "Rejected";
+  citizenResolutionFeedback?: string;
+  citizenResolutionImageUrl?: string;
+  citizenVerifiedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+const STATUSES: ComplaintStatus[] = [
+  "Reported",
+  "Verified",
+  "Assigned",
+  "In Progress",
+];
+
+const DEPARTMENTS: Department[] = [
+  "PWD",
+  "Water",
+  "Electricity",
+  "Sanitation",
+  "Traffic",
+];
+
+const DEPARTMENT_ADMINS: Record<
+  Department,
+  { id: string; name: string }
+> = {
+  PWD: { id: "PWD-ADMIN-01", name: "PWD Department Admin" },
+  Water: { id: "WATER-ADMIN-01", name: "Water Department Admin" },
+  Electricity: {
+    id: "ELEC-ADMIN-01",
+    name: "Electricity Department Admin",
+  },
+  Sanitation: {
+    id: "SAN-ADMIN-01",
+    name: "Sanitation Department Admin",
+  },
+  Traffic: {
+    id: "TRAFFIC-ADMIN-01",
+    name: "Traffic Department Admin",
+  },
 };
 
-function getSuggestedDepartment(category: string) {
+function getSuggestedDepartment(category: string): Department | "" {
   const value = category.toLowerCase();
-
-  if (
-    value.includes("water") ||
-    value.includes("leak") ||
-    value.includes("supply") ||
-    value.includes("waterlogging")
-  ) {
-    return "Water";
-  }
 
   if (
     value.includes("pothole") ||
@@ -86,9 +99,17 @@ function getSuggestedDepartment(category: string) {
   }
 
   if (
+    value.includes("water") ||
+    value.includes("leak") ||
+    value.includes("waterlogging")
+  ) {
+    return "Water";
+  }
+
+  if (
+    value.includes("electric") ||
     value.includes("streetlight") ||
-    value.includes("electricity") ||
-    value.includes("electric")
+    value.includes("switch")
   ) {
     return "Electricity";
   }
@@ -109,72 +130,113 @@ function getSuggestedDepartment(category: string) {
   return "";
 }
 
-export default function AdminComplaintDetails() {
+function formatDate(date?: string) {
+  if (!date) return "Not available";
+
+  return new Date(date).toLocaleString("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+function statusColor(status: ComplaintStatus) {
+  switch (status) {
+    case "Reported":
+      return "bg-blue-100 text-blue-700";
+    case "Verified":
+      return "bg-indigo-100 text-indigo-700";
+    case "Assigned":
+      return "bg-purple-100 text-purple-700";
+    case "In Progress":
+      return "bg-amber-100 text-amber-700";
+    case "Awaiting Citizen Verification":
+      return "bg-orange-100 text-orange-700";
+    case "Resolved":
+      return "bg-green-100 text-green-700";
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
+}
+
+export default function AdminComplaintDetailsPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
 
   const [complaint, setComplaint] = useState<Complaint | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [department, setDepartment] = useState("");
-  const [status, setStatus] = useState("");
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [updating, setUpdating] = useState(false);
 
-  useEffect(() => {
-    const fetchComplaint = async () => {
-      try {
-        setLoading(true);
-        setError("");
+  const [selectedDepartment, setSelectedDepartment] =
+    useState<Department | "">("");
 
-        const response = await fetch(`/api/complaints/${id}`, {
-          cache: "no-store",
-        });
+  const [selectedAdmin, setSelectedAdmin] = useState("");
+  const [selectedStatus, setSelectedStatus] =
+    useState<ComplaintStatus>("Reported");
 
-        const data = await response.json();
+  const [resolutionDescription, setResolutionDescription] = useState("");
+  const [submittingVerification, setSubmittingVerification] =
+    useState(false);
 
-        if (!response.ok) {
-          throw new Error(data.message || "Failed to fetch complaint.");
-        }
+  const fetchComplaint = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
 
-        const item = data.complaint as Complaint;
+      const response = await fetch(`/api/complaints/${id}`, {
+        cache: "no-store",
+      });
 
-        setComplaint(item);
-        setDepartment(
-          item.department || getSuggestedDepartment(item.category) || ""
-        );
-        setStatus(item.status || "Reported");
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Something went wrong."
-        );
-      } finally {
-        setLoading(false);
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || "Failed to fetch complaint.");
       }
-    };
 
-    if (id) fetchComplaint();
+      const item: Complaint = data.complaint;
+
+      setComplaint(item);
+      setSelectedDepartment(item.department || "");
+      setSelectedAdmin(item.assignedAdminId || "");
+      setSelectedStatus(item.status);
+      setResolutionDescription(item.resolutionDescription || "");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Something went wrong."
+      );
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
 
-  const handleAssign = async () => {
-    if (!department) {
-      setError("Please select a department.");
+  useEffect(() => {
+    if (id) fetchComplaint();
+  }, [id, fetchComplaint]);
+
+  const handleDepartmentChange = (department: Department | "") => {
+    setSelectedDepartment(department);
+    setSelectedAdmin(
+      department ? DEPARTMENT_ADMINS[department].id : ""
+    );
+  };
+
+  const handleAssignment = async () => {
+    if (!selectedDepartment) {
+      alert("Please select a department.");
       return;
     }
 
     try {
-      setSaving(true);
-      setError("");
-      setSuccess("");
+      setUpdating(true);
 
-      const admin = DEPARTMENT_ADMINS[department];
+      const admin = DEPARTMENT_ADMINS[selectedDepartment];
 
       const response = await fetch(`/api/complaints/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          department,
+          department: selectedDepartment,
           assignedAdminId: admin.id,
           assignedAdminName: admin.name,
         }),
@@ -182,414 +244,591 @@ export default function AdminComplaintDetails() {
 
       const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to assign complaint.");
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || "Assignment failed.");
       }
 
-      setComplaint(data.complaint);
-      setStatus(data.complaint.status);
-      setDepartment(data.complaint.department || department);
-      setSuccess("Complaint assigned successfully.");
+      alert("Department assigned successfully.");
+      await fetchComplaint();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to assign complaint."
+      alert(
+        err instanceof Error ? err.message : "Assignment failed."
       );
     } finally {
-      setSaving(false);
+      setUpdating(false);
     }
   };
 
   const handleStatusUpdate = async () => {
-    if (!status) return;
+    if (!selectedStatus) return;
 
-    if (
-      (status === "Assigned" || status === "In Progress") &&
-      !complaint?.department
-    ) {
-      setError("Please assign a department before updating this status.");
+    if (selectedStatus === "Resolved") {
+      alert("Only the citizen can confirm complaint resolution.");
       return;
     }
 
     try {
-      setSaving(true);
-      setError("");
-      setSuccess("");
+      setUpdating(true);
 
       const response = await fetch(`/api/complaints/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status: selectedStatus }),
       });
 
       const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to update status.");
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || "Status update failed.");
       }
 
-      setComplaint(data.complaint);
-      setSuccess("Complaint status updated successfully.");
+      alert("Complaint status updated successfully.");
+      await fetchComplaint();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to update status."
+      alert(
+        err instanceof Error ? err.message : "Status update failed."
       );
     } finally {
-      setSaving(false);
+      setUpdating(false);
     }
   };
 
-  const cardClass =
-    "rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm";
+  const handleSubmitForVerification = async () => {
+    if (!resolutionDescription.trim()) {
+      alert("Please describe the work completed.");
+      return;
+    }
 
-  const headingClass =
-    "text-xl font-extrabold tracking-tight text-slate-800";
+    if (!window.confirm(
+      "Submit this complaint for citizen verification?"
+    )) {
+      return;
+    }
 
-  const labelClass = "text-sm font-semibold text-slate-500";
+    try {
+      setSubmittingVerification(true);
 
-  const valueClass = "mt-1 text-sm font-semibold text-slate-800";
+      const response = await fetch(`/api/complaints/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          submitForVerification: true,
+          resolutionDescription: resolutionDescription.trim(),
+        }),
+      });
 
-  const inputClass =
-    "mt-2 w-full rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Failed to submit for verification."
+        );
+      }
+
+      alert("Complaint submitted for citizen verification.");
+      await fetchComplaint();
+    } catch (err) {
+      alert(
+        err instanceof Error
+          ? err.message
+          : "Failed to submit for verification."
+      );
+    } finally {
+      setSubmittingVerification(false);
+    }
+  };
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-slate-50/80 px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mx-auto flex min-h-[60vh] max-w-[1500px] items-center justify-center">
-          <p className="text-sm font-semibold text-slate-500">
-            Loading complaint...
-          </p>
-        </div>
-      </main>
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <p className="text-sm font-semibold text-slate-500">
+          Loading complaint details...
+        </p>
+      </div>
     );
   }
 
-  if (error && !complaint) {
+  if (error || !complaint) {
     return (
-      <main className="min-h-screen bg-slate-50/80 px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-[1500px]">
-          <div className="rounded-2xl border border-red-200 bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-extrabold text-red-700">
-              Unable to load complaint
-            </h2>
-            <p className="mt-2 text-sm text-red-600">{error}</p>
-            <button
-              onClick={() => router.push("/admin/complaints")}
-              className="mt-5 rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white"
-            >
-              Back to Complaints
-            </button>
-          </div>
+      <div className="min-h-[60vh] px-6 py-10">
+        <div className="mx-auto max-w-3xl rounded-2xl border border-red-200 bg-white p-8">
+          <h2 className="text-xl font-bold text-red-600">
+            Unable to load complaint
+          </h2>
+          <p className="mt-2 text-sm text-slate-600">
+            {error || "Complaint not found."}
+          </p>
+          <button
+            onClick={() => router.back()}
+            className="mt-5 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white"
+          >
+            Go Back
+          </button>
         </div>
-      </main>
+      </div>
     );
   }
 
-  if (!complaint) return null;
+  const isAwaitingVerification =
+    complaint.status === "Awaiting Citizen Verification";
 
-  const selectedAdmin = department
-    ? DEPARTMENT_ADMINS[department]
-    : null;
-
-  const suggestedDepartment = getSuggestedDepartment(complaint.category);
+  const isResolved = complaint.status === "Resolved";
 
   return (
-    <main className="min-h-screen bg-slate-50/80 px-4 py-6 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-slate-50/80 px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1500px] space-y-8">
 
-        {/* HEADER */}
-        <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        {/* PAGE HEADER */}
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
-            <button
-              onClick={() => router.push("/admin/complaints")}
-              className="mb-3 text-sm font-semibold text-blue-600 hover:text-blue-800"
-            >
-              ← Back to Complaints
-            </button>
-
-            <p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-blue-600">
-              CityCare Administration
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-600">
+              Admin Portal
             </p>
 
-            <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">
+            <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">
               Complaint Details
             </h1>
 
             <p className="mt-2 text-sm font-medium text-slate-500">
-              Review complaint information and manage its assignment and status.
+              Review, assign and monitor this complaint.
             </p>
           </div>
 
-          <span className="inline-flex w-fit items-center rounded-xl bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700">
-            {complaint.status}
-          </span>
-        </header>
+          <button
+            onClick={() => router.push("/admin/complaints")}
+            className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            ← Back to Complaints
+          </button>
+        </div>
 
-        {/* ALERTS */}
-        {error && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-semibold text-red-700">
-            {error}
-          </div>
-        )}
-
-        {success && (
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700">
-            {success}
-          </div>
-        )}
-
-        {/* COMPLAINT OVERVIEW */}
-        <section>
-          <div className="mb-5">
-            <h2 className={headingClass}>Complaint Overview</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Basic information about the reported issue.
+        {/* STATUS AND OVERVIEW */}
+        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+            <p className="text-sm font-semibold text-slate-500">
+              Complaint Category
             </p>
+            <h3 className="mt-3 text-xl font-extrabold text-slate-900">
+              {complaint.category}
+            </h3>
           </div>
 
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-            {[
-              { title: "Category", value: complaint.category },
-              { title: "Current Status", value: complaint.status },
-              { title: "Department", value: complaint.department || "Unassigned" },
-              {
-                title: "Reported On",
-                value: new Date(complaint.createdAt).toLocaleDateString("en-IN"),
-              },
-            ].map((item) => (
-              <div key={item.title} className={cardClass}>
-                <p className={labelClass}>{item.title}</p>
-                <p className="mt-3 text-xl font-extrabold tracking-tight text-slate-900">
-                  {item.value}
-                </p>
-              </div>
-            ))}
+          <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+            <p className="text-sm font-semibold text-slate-500">
+              Current Status
+            </p>
+            <span
+              className={`mt-3 inline-flex rounded-full px-3 py-1.5 text-xs font-bold ${statusColor(
+                complaint.status
+              )}`}
+            >
+              {complaint.status}
+            </span>
           </div>
-        </section>
 
-        {/* MAIN CONTENT */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+            <p className="text-sm font-semibold text-slate-500">
+              Department
+            </p>
+            <h3 className="mt-3 text-xl font-extrabold text-slate-900">
+              {complaint.department || "Not Assigned"}
+            </h3>
+          </div>
 
-          {/* LEFT SIDE */}
-          <div className="space-y-6 lg:col-span-2">
+          <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+            <p className="text-sm font-semibold text-slate-500">
+              Reported Date
+            </p>
+            <h3 className="mt-3 text-base font-extrabold text-slate-900">
+              {formatDate(complaint.createdAt)}
+            </h3>
+          </div>
+        </div>
 
-            {/* INFORMATION */}
-            <section className={cardClass}>
-              <h2 className={headingClass}>Complaint Information</h2>
+        <div className="grid items-start gap-6 xl:grid-cols-3">
 
-              <div className="mt-6 grid gap-6 sm:grid-cols-2">
+          {/* COMPLAINT INFORMATION */}
+          <div className="space-y-6 xl:col-span-2">
+
+            <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-extrabold tracking-tight text-slate-800">
+                Complaint Information
+              </h2>
+
+              <div className="mt-6 space-y-5">
                 <div>
-                  <p className={labelClass}>Complaint ID</p>
-                  <p className={`${valueClass} break-all`}>{complaint._id}</p>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    Complaint ID
+                  </p>
+                  <p className="mt-1 break-all text-sm font-semibold text-slate-700">
+                    {complaint._id}
+                  </p>
                 </div>
 
                 <div>
-                  <p className={labelClass}>Citizen ID</p>
-                  <p className={valueClass}>{complaint.citizenId}</p>
-                </div>
-
-                <div className="sm:col-span-2">
-                  <p className={labelClass}>Description</p>
-                  <p className="mt-2 text-sm font-medium leading-7 text-slate-700">
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    Description
+                  </p>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700">
                     {complaint.description}
                   </p>
                 </div>
 
-                <div className="sm:col-span-2">
-                  <p className={labelClass}>Location</p>
-                  <p className={valueClass}>
-                    {complaint.location?.address || "Address not available"}
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    Location
                   </p>
-                  <p className="mt-2 text-xs font-medium text-slate-400">
-                    Latitude: {complaint.location?.latitude ?? "—"} •
-                    Longitude: {complaint.location?.longitude ?? "—"}
+                  <p className="mt-2 text-sm text-slate-700">
+                    {complaint.location?.address ||
+                      `${complaint.location?.latitude ?? "N/A"}, ${
+                        complaint.location?.longitude ?? "N/A"
+                      }`}
                   </p>
                 </div>
 
                 {complaint.landmark && (
                   <div>
-                    <p className={labelClass}>Landmark</p>
-                    <p className={valueClass}>{complaint.landmark}</p>
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Landmark
+                    </p>
+                    <p className="mt-1 text-sm text-slate-700">
+                      {complaint.landmark}
+                    </p>
                   </div>
                 )}
 
                 {complaint.locationDetails && (
                   <div>
-                    <p className={labelClass}>Location Details</p>
-                    <p className={valueClass}>{complaint.locationDetails}</p>
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Additional Location Details
+                    </p>
+                    <p className="mt-1 text-sm text-slate-700">
+                      {complaint.locationDetails}
+                    </p>
                   </div>
                 )}
-              </div>
-            </section>
 
-            {/* IMAGE */}
-            {complaint.imageUrl && (
-              <section className={cardClass}>
-                <h2 className={headingClass}>Complaint Image</h2>
-                <img
-                  src={complaint.imageUrl}
-                  alt="Complaint"
-                  className="mt-5 max-h-[450px] w-full rounded-xl bg-slate-50 object-contain"
-                />
-              </section>
-            )}
-
-            {/* STATUS HISTORY */}
-            <section className={cardClass}>
-              <h2 className={headingClass}>Status History</h2>
-
-              <div className="mt-6 space-y-5">
-                {complaint.statusHistory?.length ? (
-                  complaint.statusHistory
-                    .slice()
-                    .reverse()
-                    .map((item, index) => (
-                      <div
-                        key={`${item.status}-${index}`}
-                        className="flex gap-4"
-                      >
-                        <div className="mt-1.5 h-3 w-3 shrink-0 rounded-full bg-blue-600 ring-4 ring-blue-50" />
-
-                        <div>
-                          <p className="text-sm font-bold text-slate-800">
-                            {item.status}
-                          </p>
-                          <p className="mt-1 text-xs font-medium text-slate-400">
-                            {new Date(item.timestamp).toLocaleString("en-IN")}
-                          </p>
-                        </div>
-                      </div>
-                    ))
-                ) : (
-                  <p className="text-sm text-slate-400">
-                    No status history available.
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    Citizen ID
                   </p>
-                )}
-              </div>
-            </section>
-          </div>
-
-          {/* RIGHT SIDE */}
-          <div className="space-y-6">
-
-            {/* ASSIGNMENT */}
-            <section className={cardClass}>
-              <h2 className={headingClass}>Assign Complaint</h2>
-
-              <p className="mt-2 text-sm text-slate-500">
-                Select the department responsible for resolving this issue.
-              </p>
-
-              {suggestedDepartment && !complaint.department && (
-                <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4">
-                  <p className="text-xs font-bold uppercase tracking-wider text-blue-600">
-                    Suggested Department
-                  </p>
-                  <p className="mt-1 text-sm font-extrabold text-blue-800">
-                    {suggestedDepartment}
+                  <p className="mt-1 break-all text-sm font-semibold text-slate-700">
+                    {complaint.citizenId}
                   </p>
                 </div>
+              </div>
+
+              {complaint.imageUrl && (
+                <div className="mt-7">
+                  <h3 className="mb-3 text-sm font-bold text-slate-700">
+                    Complaint Photo
+                  </h3>
+                  <a
+                    href={complaint.imageUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      src={complaint.imageUrl}
+                      alt="Complaint"
+                      className="max-h-[420px] w-full rounded-xl border border-slate-200 object-contain"
+                    />
+                  </a>
+                </div>
               )}
+            </section>
+
+            {/* STATUS HISTORY */}
+            <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-extrabold tracking-tight text-slate-800">
+                Status History
+              </h2>
+
+              <div className="mt-6 space-y-5">
+                {complaint.statusHistory?.map((item, index) => (
+                  <div key={`${item.status}-${index}`} className="flex gap-4">
+                    <div className="flex flex-col items-center">
+                      <div className="h-3 w-3 rounded-full bg-blue-600" />
+                      {index !== complaint.statusHistory.length - 1 && (
+                        <div className="mt-1 min-h-8 w-0.5 bg-slate-200" />
+                      )}
+                    </div>
+
+                    <div className="-mt-1 pb-2">
+                      <p className="text-sm font-bold text-slate-800">
+                        {item.status}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {formatDate(item.timestamp)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* RESOLUTION DETAILS */}
+            {(complaint.resolutionDescription ||
+              complaint.citizenResolutionFeedback ||
+              complaint.citizenResolutionImageUrl) && (
+              <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+                <h2 className="text-xl font-extrabold tracking-tight text-slate-800">
+                  Resolution & Citizen Verification
+                </h2>
+
+                {complaint.resolutionDescription && (
+                  <div className="mt-5">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Work Completed by Department
+                    </p>
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                      {complaint.resolutionDescription}
+                    </p>
+                  </div>
+                )}
+
+                {complaint.resolutionSubmittedAt && (
+                  <p className="mt-3 text-xs text-slate-500">
+                    Submitted for verification:{" "}
+                    {formatDate(complaint.resolutionSubmittedAt)}
+                  </p>
+                )}
+
+                {complaint.citizenResolutionStatus && (
+                  <div className="mt-5">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Citizen Response
+                    </p>
+                    <p className="mt-2 text-sm font-bold text-slate-800">
+                      {complaint.citizenResolutionStatus}
+                    </p>
+                  </div>
+                )}
+
+                {complaint.citizenResolutionFeedback && (
+                  <div className="mt-4">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Citizen Feedback
+                    </p>
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
+                      {complaint.citizenResolutionFeedback}
+                    </p>
+                  </div>
+                )}
+
+                {complaint.citizenResolutionImageUrl && (
+                  <div className="mt-5">
+                    <p className="mb-3 text-sm font-bold text-slate-700">
+                      Citizen Verification Photo
+                    </p>
+                    <a
+                      href={complaint.citizenResolutionImageUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <img
+                        src={complaint.citizenResolutionImageUrl}
+                        alt="Citizen verification"
+                        className="max-h-[350px] w-full rounded-xl border border-slate-200 object-contain"
+                      />
+                    </a>
+                  </div>
+                )}
+
+                {complaint.citizenVerifiedAt && (
+                  <p className="mt-4 text-xs text-slate-500">
+                    Citizen response date:{" "}
+                    {formatDate(complaint.citizenVerifiedAt)}
+                  </p>
+                )}
+              </section>
+            )}
+          </div>
+
+          {/* ADMIN ACTIONS */}
+          <div className="space-y-6">
+
+            {/* DEPARTMENT ASSIGNMENT */}
+            <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-extrabold tracking-tight text-slate-800">
+                Assign Department
+              </h2>
+
+              <p className="mt-2 text-sm text-slate-500">
+                Select the department responsible for this complaint.
+              </p>
 
               <label className="mt-5 block text-sm font-bold text-slate-700">
-                Select Department
+                Department
               </label>
 
               <select
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-                className={inputClass}
+                value={selectedDepartment}
+                onChange={(e) =>
+                  handleDepartmentChange(e.target.value as Department | "")
+                }
+                disabled={isAwaitingVerification || isResolved || updating}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:border-blue-500 disabled:bg-slate-100"
               >
                 <option value="">Select Department</option>
-                {DEPARTMENTS.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
+                {DEPARTMENTS.map((department) => (
+                  <option key={department} value={department}>
+                    {department}
                   </option>
                 ))}
               </select>
 
-              {selectedAdmin && (
-                <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-4">
-                  <p className="text-xs font-semibold text-slate-500">
-                    Department Admin
+              {selectedDepartment && (
+                <div className="mt-4 rounded-xl bg-slate-50 p-4">
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    Assigned Department Admin
                   </p>
-                  <p className="mt-1 text-sm font-bold text-slate-800">
-                    {selectedAdmin.name}
+                  <p className="mt-2 text-sm font-bold text-slate-800">
+                    {DEPARTMENT_ADMINS[selectedDepartment].name}
                   </p>
                 </div>
               )}
 
               <button
-                onClick={handleAssign}
-                disabled={saving || !department}
-                className="mt-5 w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={handleAssignment}
+                disabled={
+                  updating ||
+                  isAwaitingVerification ||
+                  isResolved ||
+                  !selectedDepartment
+                }
+                className="mt-5 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {saving ? "Saving..." : "Assign Complaint"}
+                {updating ? "Updating..." : "Save Assignment"}
               </button>
             </section>
 
             {/* STATUS UPDATE */}
-            <section className={cardClass}>
-              <h2 className={headingClass}>Update Status</h2>
+            <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-extrabold tracking-tight text-slate-800">
+                Update Status
+              </h2>
+
+              <p className="mt-2 text-sm text-slate-500">
+                Update the progress of this complaint.
+              </p>
 
               <label className="mt-5 block text-sm font-bold text-slate-700">
                 Complaint Status
               </label>
 
               <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-                className={inputClass}
+                value={selectedStatus}
+                onChange={(e) =>
+                  setSelectedStatus(e.target.value as ComplaintStatus)
+                }
+                disabled={isAwaitingVerification || isResolved || updating}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:border-blue-500 disabled:bg-slate-100"
               >
-                {STATUSES.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
+                {STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
                   </option>
                 ))}
               </select>
 
               <button
                 onClick={handleStatusUpdate}
-                disabled={saving}
-                className="mt-5 w-full rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+                disabled={
+                  updating ||
+                  isAwaitingVerification ||
+                  isResolved ||
+                  selectedStatus === complaint.status
+                }
+                className="mt-5 w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {saving ? "Updating..." : "Update Status"}
+                Update Status
               </button>
             </section>
 
-            {/* CURRENT ASSIGNMENT */}
-            <section className={cardClass}>
-              <h2 className={headingClass}>Current Assignment</h2>
-
-              <div className="mt-5 space-y-5">
-                <div>
-                  <p className={labelClass}>Department</p>
-                  <p className={valueClass}>
-                    {complaint.department || "Not Assigned"}
-                  </p>
+            {/* SUBMIT FOR CITIZEN VERIFICATION */}
+            {complaint.status === "In Progress" && (
+              <section className="rounded-2xl border border-orange-200 bg-white p-6 shadow-sm">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-100 text-xl">
+                  ✓
                 </div>
 
-                <div>
-                  <p className={labelClass}>Department Admin</p>
-                  <p className={valueClass}>
-                    {complaint.assignedAdminName || "Not Assigned"}
-                  </p>
-                </div>
+                <h2 className="mt-4 text-xl font-extrabold text-slate-800">
+                  Submit for Citizen Verification
+                </h2>
 
-                <div>
-                  <p className={labelClass}>Admin ID</p>
-                  <p className={valueClass}>
-                    {complaint.assignedAdminId || "Not Assigned"}
-                  </p>
-                </div>
-              </div>
-            </section>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  After completing the work, describe what was done.
+                  The citizen will verify whether the problem is actually
+                  resolved.
+                </p>
+
+                <label className="mt-5 block text-sm font-bold text-slate-700">
+                  Work Completion Description
+                </label>
+
+                <textarea
+                  value={resolutionDescription}
+                  onChange={(e) =>
+                    setResolutionDescription(e.target.value)
+                  }
+                  rows={5}
+                  placeholder="Describe the work completed by the department..."
+                  className="mt-2 w-full resize-y rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 outline-none focus:border-orange-500"
+                />
+
+                <button
+                  onClick={handleSubmitForVerification}
+                  disabled={
+                    submittingVerification ||
+                    !resolutionDescription.trim()
+                  }
+                  className="mt-4 w-full rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-white hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {submittingVerification
+                    ? "Submitting..."
+                    : "Submit for Citizen Verification"}
+                </button>
+              </section>
+            )}
+
+            {/* AWAITING CITIZEN RESPONSE */}
+            {isAwaitingVerification && (
+              <section className="rounded-2xl border border-orange-200 bg-orange-50 p-6">
+                <h2 className="text-lg font-extrabold text-orange-800">
+                  Awaiting Citizen Verification
+                </h2>
+
+                <p className="mt-2 text-sm leading-6 text-orange-700">
+                  Department has submitted the completed work. The
+                  complaint will be marked Resolved only after the
+                  citizen confirms it.
+                </p>
+
+                <p className="mt-4 text-xs font-bold text-orange-700">
+                  Current response:{" "}
+                  {complaint.citizenResolutionStatus || "Pending"}
+                </p>
+              </section>
+            )}
+
+            {/* FINAL RESOLVED STATE */}
+            {isResolved && (
+              <section className="rounded-2xl border border-green-200 bg-green-50 p-6">
+                <h2 className="text-lg font-extrabold text-green-800">
+                  Complaint Resolved
+                </h2>
+
+                <p className="mt-2 text-sm leading-6 text-green-700">
+                  The citizen has confirmed that the reported problem
+                  has been resolved.
+                </p>
+              </section>
+            )}
+
           </div>
         </div>
-
-        <footer className="pb-3 text-center text-xs font-medium text-slate-400">
-          CityCare Admin Portal • One Platform for Local Problems
-        </footer>
       </div>
-    </main>
+    </div>
   );
 }

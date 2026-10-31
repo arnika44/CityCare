@@ -1,12 +1,15 @@
 import mongoose, { Schema, Document } from "mongoose";
 
+export type ComplaintStatus =
+  | "Reported"
+  | "Verified"
+  | "Assigned"
+  | "In Progress"
+  | "Awaiting Citizen Verification"
+  | "Resolved";
+
 export interface IStatusHistory {
-  status:
-    | "Reported"
-    | "Verified"
-    | "Assigned"
-    | "In Progress"
-    | "Resolved";
+  status: ComplaintStatus;
   timestamp: Date;
 }
 
@@ -14,36 +17,29 @@ export interface IComplaint extends Document {
   citizenId: string;
   category: string;
   description: string;
-
   imageUrl?: string;
-
   location: {
     latitude: number;
     longitude: number;
     address?: string;
   };
-
   landmark?: string;
   locationDetails?: string;
 
-  department?:
-    | "PWD"
-    | "Water"
-    | "Electricity"
-    | "Sanitation"
-    | "Traffic";
-
+  department?: "PWD" | "Water" | "Electricity" | "Sanitation" | "Traffic";
   assignedAdminId?: string;
   assignedAdminName?: string;
 
-  status:
-    | "Reported"
-    | "Verified"
-    | "Assigned"
-    | "In Progress"
-    | "Resolved";
-
+  status: ComplaintStatus;
   statusHistory: IStatusHistory[];
+
+  resolutionDescription?: string;
+  resolutionSubmittedAt?: Date;
+
+  citizenResolutionStatus?: "Pending" | "Confirmed" | "Rejected";
+  citizenResolutionFeedback?: string;
+  citizenResolutionImageUrl?: string;
+  citizenVerifiedAt?: Date;
 
   createdAt: Date;
   updatedAt: Date;
@@ -58,93 +54,43 @@ const StatusHistorySchema = new Schema<IStatusHistory>(
         "Verified",
         "Assigned",
         "In Progress",
+        "Awaiting Citizen Verification",
         "Resolved",
       ],
       required: true,
     },
-
     timestamp: {
       type: Date,
-      required: true,
       default: Date.now,
     },
   },
-  {
-    _id: false,
-  }
+  { _id: false }
 );
 
 const ComplaintSchema = new Schema<IComplaint>(
   {
-    citizenId: {
-      type: String,
-      required: true,
-    },
-
-    category: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
-    description: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
-    imageUrl: {
-      type: String,
-      default: "",
-    },
+    citizenId: { type: String, required: true },
+    category: { type: String, required: true },
+    description: { type: String, required: true },
+    imageUrl: { type: String },
 
     location: {
-      latitude: {
-        type: Number,
-        required: true,
-      },
-
-      longitude: {
-        type: Number,
-        required: true,
-      },
-
-      address: {
-        type: String,
-        default: "",
-      },
+      latitude: { type: Number, required: true },
+      longitude: { type: Number, required: true },
+      address: { type: String },
     },
 
-    landmark: {
-      type: String,
-      default: "",
-    },
-
-    locationDetails: {
-      type: String,
-      default: "",
-    },
+    landmark: { type: String },
+    locationDetails: { type: String },
 
     department: {
       type: String,
-      enum: [
-        "PWD",
-        "Water",
-        "Electricity",
-        "Sanitation",
-        "Traffic",
-      ],
-    },
-
-    assignedAdminId: {
-      type: String,
+      enum: ["PWD", "Water", "Electricity", "Sanitation", "Traffic"],
       default: "",
     },
 
-    assignedAdminName: {
-      type: String,
-      default: "",
-    },
+    assignedAdminId: { type: String, default: "" },
+    assignedAdminName: { type: String, default: "" },
 
     status: {
       type: String,
@@ -153,6 +99,7 @@ const ComplaintSchema = new Schema<IComplaint>(
         "Verified",
         "Assigned",
         "In Progress",
+        "Awaiting Citizen Verification",
         "Resolved",
       ],
       default: "Reported",
@@ -160,24 +107,23 @@ const ComplaintSchema = new Schema<IComplaint>(
 
     statusHistory: {
       type: [StatusHistorySchema],
-      default: function () {
-        return [
-          {
-            status: "Reported",
-            timestamp: new Date(),
-          },
-        ];
-      },
+      default: () => [{ status: "Reported", timestamp: new Date() }],
     },
-  },
 
-  {
-    timestamps: true,
-  }
+    resolutionDescription: { type: String, default: "" },
+    resolutionSubmittedAt: { type: Date },
+
+    citizenResolutionStatus: {
+      type: String,
+      enum: ["Pending", "Confirmed", "Rejected"],
+    },
+
+    citizenResolutionFeedback: { type: String, default: "" },
+    citizenResolutionImageUrl: { type: String, default: "" },
+    citizenVerifiedAt: { type: Date },
+  },
+  { timestamps: true }
 );
 
-const Complaint =
-  mongoose.models.Complaint ||
+export default mongoose.models.Complaint ||
   mongoose.model<IComplaint>("Complaint", ComplaintSchema);
-
-export default Complaint;

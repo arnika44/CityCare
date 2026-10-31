@@ -1,7 +1,8 @@
+
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
 type Status =
@@ -9,6 +10,7 @@ type Status =
   | "Verified"
   | "Assigned"
   | "In Progress"
+  | "Awaiting Citizen Verification"
   | "Resolved";
 
 type StatusHistory = {
@@ -30,6 +32,12 @@ type Complaint = {
   locationDetails?: string;
   status: Status;
   statusHistory?: StatusHistory[];
+  resolutionDescription?: string;
+  resolutionSubmittedAt?: string;
+  citizenResolutionStatus?: "Pending" | "Confirmed" | "Rejected";
+  citizenResolutionFeedback?: string;
+  citizenResolutionImageUrl?: string;
+  citizenVerifiedAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -39,6 +47,7 @@ const STATUSES: Status[] = [
   "Verified",
   "Assigned",
   "In Progress",
+  "Awaiting Citizen Verification",
   "Resolved",
 ];
 
@@ -50,56 +59,66 @@ export default function ComplaintDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    const fetchComplaint = async () => {
-      try {
-        const citizenId = localStorage.getItem("citycare_citizen_id");
+  const [citizenId, setCitizenId] = useState("");
 
-        if (!citizenId) {
-          setError("Citizen ID not found.");
-          setIsLoading(false);
-          return;
-        }
+  const [citizenFeedback, setCitizenFeedback] = useState("");
+  const [verificationImage, setVerificationImage] = useState<File | null>(
+    null
+  );
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-        const response = await fetch(
-          `/api/complaints?citizenId=${encodeURIComponent(citizenId)}`
-        );
+  const fetchComplaint = useCallback(async () => {
+    try {
+      setError("");
 
-        const data = await response.json();
+      const storedCitizenId = localStorage.getItem("citycare_citizen_id");
 
-        if (!response.ok || !data.success) {
-          throw new Error(
-            data.message || "Failed to fetch complaint."
-          );
-        }
-
-        const selectedComplaint = data.complaints.find(
-          (item: Complaint) => item._id === complaintId
-        );
-
-        if (!selectedComplaint) {
-          setError("Complaint not found.");
-          return;
-        }
-
-        setComplaint(selectedComplaint);
-      } catch (error) {
-        console.error("Complaint detail fetch error:", error);
-
-        setError(
-          error instanceof Error
-            ? error.message
-            : "Unable to load complaint."
-        );
-      } finally {
-        setIsLoading(false);
+      if (!storedCitizenId) {
+        setError("Citizen ID not found.");
+        return;
       }
-    };
 
+      setCitizenId(storedCitizenId);
+
+      const response = await fetch(
+        `/api/complaints?citizenId=${encodeURIComponent(storedCitizenId)}`,
+        { cache: "no-store" }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || "Failed to fetch complaint.");
+      }
+
+      const selectedComplaint = data.complaints.find(
+        (item: Complaint) => item._id === complaintId
+      );
+
+      if (!selectedComplaint) {
+        setError("Complaint not found.");
+        return;
+      }
+
+      setComplaint(selectedComplaint);
+    } catch (error) {
+      console.error("Complaint detail fetch error:", error);
+
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load complaint."
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [complaintId]);
+
+  useEffect(() => {
     if (complaintId) {
       fetchComplaint();
     }
-  }, [complaintId]);
+  }, [complaintId, fetchComplaint]);
 
   const getHistoryTimestamp = (status: Status) => {
     const history = complaint?.statusHistory || [];
@@ -122,6 +141,101 @@ export default function ComplaintDetailPage() {
 
   const isCurrentStatus = (status: Status) => {
     return complaint?.status === status;
+  };
+
+  const handleCitizenResponse = async (
+    action: "confirm" | "reject"
+  ) => {
+    if (!complaint || !citizenId) {
+      alert("Citizen information not found.");
+      return;
+    }
+
+    if (
+      action === "reject" &&
+      !citizenFeedback.trim()
+    ) {
+      alert("Please explain why the problem is not resolved.");
+      return;
+    }
+
+    const confirmationMessage =
+      action === "confirm"
+        ? "Are you sure the problem has been resolved?"
+        : "Are you sure the problem is still not resolved?";
+
+    if (!window.confirm(confirmationMessage)) {
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+
+      let uploadedImageUrl = "";
+
+      // Upload optional verification photo
+      if (verificationImage) {
+        const formData = new FormData();
+        formData.append("file", verificationImage);
+
+        const uploadResponse = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        const uploadData = await uploadResponse.json();
+
+        if (!uploadResponse.ok || !uploadData.success) {
+          throw new Error(
+            uploadData.message || "Failed to upload image."
+          );
+        }
+
+        uploadedImageUrl = uploadData.imageUrl;
+      }
+
+      const response = await fetch(`/api/complaints/${complaintId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          citizenAction: action,
+          citizenId,
+          feedback: citizenFeedback.trim(),
+          imageUrl: uploadedImageUrl,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Failed to submit your response."
+        );
+      }
+
+      alert(
+        action === "confirm"
+          ? "Thank you! Your confirmation has been submitted. Complaint marked as resolved."
+          : "Your response has been submitted. The complaint has been returned to In Progress."
+      );
+
+      setCitizenFeedback("");
+      setVerificationImage(null);
+
+      await fetchComplaint();
+    } catch (error) {
+      console.error("Citizen verification error:", error);
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Unable to submit your response."
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (isLoading) {
@@ -204,6 +318,8 @@ export default function ComplaintDetailPage() {
                       ? "bg-blue-100 text-blue-700"
                       : complaint.status === "Assigned"
                       ? "bg-purple-100 text-purple-700"
+                      : complaint.status === "Awaiting Citizen Verification"
+                      ? "bg-orange-100 text-orange-700"
                       : "bg-yellow-100 text-yellow-700"
                   }`}
                 >
@@ -283,6 +399,179 @@ export default function ComplaintDetailPage() {
             )}
           </div>
         </section>
+
+        {/* Department Resolution Details */}
+        {complaint.resolutionDescription && (
+          <section className="mt-8 rounded-2xl border bg-white p-6 shadow-md">
+            <h2 className="text-2xl font-bold text-gray-900">
+              Department Work Update
+            </h2>
+
+            <p className="mt-2 text-gray-600">
+              The department has submitted the following work completion update.
+            </p>
+
+            <div className="mt-5 rounded-xl bg-blue-50 p-5">
+              <p className="text-sm font-semibold text-blue-700">
+                Work Completed
+              </p>
+
+              <p className="mt-2 whitespace-pre-wrap text-gray-800">
+                {complaint.resolutionDescription}
+              </p>
+
+              {complaint.resolutionSubmittedAt && (
+                <p className="mt-3 text-sm text-gray-500">
+                  Submitted on:{" "}
+                  {new Date(
+                    complaint.resolutionSubmittedAt
+                  ).toLocaleString("en-IN")}
+                </p>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* Citizen Verification */}
+        {complaint.status === "Awaiting Citizen Verification" && (
+          <section className="mt-8 rounded-2xl border border-orange-200 bg-orange-50 p-6 shadow-md">
+            <h2 className="text-2xl font-bold text-orange-900">
+              Verify Complaint Resolution
+            </h2>
+
+            <p className="mt-2 text-orange-800">
+              The department says that the work is completed. Please check
+              whether your problem has actually been resolved.
+            </p>
+
+            <div className="mt-6 rounded-xl border border-orange-200 bg-white p-5">
+              <p className="text-sm font-semibold text-gray-700">
+                Is your problem resolved?
+              </p>
+
+              <p className="mt-2 text-sm text-gray-500">
+                You can confirm if the issue is fixed or report that it
+                still exists. You may also upload a photo as evidence.
+              </p>
+
+              <div className="mt-5">
+                <label className="block text-sm font-semibold text-gray-700">
+                  Feedback / Additional Details
+                </label>
+
+                <textarea
+                  value={citizenFeedback}
+                  onChange={(e) => setCitizenFeedback(e.target.value)}
+                  rows={3}
+                  placeholder="Write your feedback here. If the problem is not resolved, explain why..."
+                  className="mt-2 w-full rounded-lg border border-gray-300 p-3 text-sm text-gray-800 outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="mt-5">
+                <label className="block text-sm font-semibold text-gray-700">
+                  Upload After-Resolution Photo (Optional)
+                </label>
+
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) =>
+                    setVerificationImage(e.target.files?.[0] || null)
+                  }
+                  className="mt-2 block w-full text-sm text-gray-600 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-100 file:px-4 file:py-2 file:font-semibold file:text-blue-700 hover:file:bg-blue-200"
+                />
+
+                {verificationImage && (
+                  <p className="mt-2 text-sm text-green-700">
+                    Selected: {verificationImage.name}
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                <button
+                  onClick={() => handleCitizenResponse("confirm")}
+                  disabled={isSubmitting}
+                  className="rounded-lg bg-green-600 px-5 py-3 font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSubmitting
+                    ? "Submitting..."
+                    : "✓ Problem Resolved"}
+                </button>
+
+                <button
+                  onClick={() => handleCitizenResponse("reject")}
+                  disabled={isSubmitting}
+                  className="rounded-lg bg-red-600 px-5 py-3 font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSubmitting
+                    ? "Submitting..."
+                    : "✕ Problem Not Resolved"}
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Citizen Verification Result */}
+        {complaint.citizenResolutionStatus &&
+          complaint.status !== "Awaiting Citizen Verification" && (
+            <section className="mt-8 rounded-2xl border bg-white p-6 shadow-md">
+              <h2 className="text-2xl font-bold text-gray-900">
+                Your Verification Response
+              </h2>
+
+              <p className="mt-4 text-sm font-semibold text-gray-500">
+                Response
+              </p>
+
+              <p
+                className={`mt-2 font-bold ${
+                  complaint.citizenResolutionStatus === "Confirmed"
+                    ? "text-green-700"
+                    : "text-red-700"
+                }`}
+              >
+                {complaint.citizenResolutionStatus}
+              </p>
+
+              {complaint.citizenResolutionFeedback && (
+                <div className="mt-4">
+                  <p className="text-sm font-semibold text-gray-500">
+                    Your Feedback
+                  </p>
+
+                  <p className="mt-2 whitespace-pre-wrap text-gray-800">
+                    {complaint.citizenResolutionFeedback}
+                  </p>
+                </div>
+              )}
+
+              {complaint.citizenResolutionImageUrl && (
+                <div className="mt-5">
+                  <p className="mb-2 text-sm font-semibold text-gray-500">
+                    Uploaded Verification Photo
+                  </p>
+
+                  <img
+                    src={complaint.citizenResolutionImageUrl}
+                    alt="Citizen verification"
+                    className="h-48 w-full rounded-xl border object-cover sm:w-64"
+                  />
+                </div>
+              )}
+
+              {complaint.citizenVerifiedAt && (
+                <p className="mt-4 text-sm text-gray-500">
+                  Response submitted on:{" "}
+                  {new Date(
+                    complaint.citizenVerifiedAt
+                  ).toLocaleString("en-IN")}
+                </p>
+              )}
+            </section>
+          )}
 
         {/* Tracking */}
         <section className="mt-8 rounded-2xl border bg-white p-6 shadow-md">
@@ -380,6 +669,13 @@ export default function ComplaintDetailPage() {
               {complaint.status}
             </h2>
           </div>
+
+          <button
+            onClick={fetchComplaint}
+            className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+          >
+            Refresh Status
+          </button>
         </section>
 
       </div>

@@ -1,13 +1,13 @@
+
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/mongodb";
 import Complaint from "@/models/Complaint";
 
-const VALID_STATUSES = [
+const ADMIN_STATUSES = [
   "Reported",
   "Verified",
   "Assigned",
   "In Progress",
-  "Resolved",
 ] as const;
 
 const VALID_DEPARTMENTS = [
@@ -19,31 +19,12 @@ const VALID_DEPARTMENTS = [
 ] as const;
 
 type Context = {
-  params: Promise<{
-    id: string;
-  }>;
+  params: Promise<{ id: string }>;
 };
 
-// ==========================================
-// GET SINGLE COMPLAINT
-// ==========================================
-
-export async function GET(
-  request: Request,
-  { params }: Context
-) {
+export async function GET(request: Request, { params }: Context) {
   try {
     const { id } = await params;
-
-    if (!id) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Complaint ID is required.",
-        },
-        { status: 400 }
-      );
-    }
 
     await connectToDatabase();
 
@@ -51,108 +32,29 @@ export async function GET(
 
     if (!complaint) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Complaint not found.",
-        },
+        { success: false, message: "Complaint not found." },
         { status: 404 }
       );
     }
 
     return NextResponse.json(
-      {
-        success: true,
-        complaint,
-      },
+      { success: true, complaint },
       { status: 200 }
     );
   } catch (error) {
-    console.error("Single Complaint Fetch API Error:", error);
+    console.error("Complaint Details GET API Error:", error);
 
     return NextResponse.json(
-      {
-        success: false,
-        message: "Failed to fetch complaint.",
-      },
+      { success: false, message: "Failed to fetch complaint." },
       { status: 500 }
     );
   }
 }
 
-// ==========================================
-// PATCH COMPLAINT
-// STATUS / DEPARTMENT / ADMIN ASSIGNMENT
-// ==========================================
-
-export async function PATCH(
-  request: Request,
-  { params }: Context
-) {
+export async function PATCH(request: Request, { params }: Context) {
   try {
     const { id } = await params;
-
-    if (!id) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Complaint ID is required.",
-        },
-        { status: 400 }
-      );
-    }
-
     const body = await request.json();
-
-    const {
-      status,
-      department,
-      assignedAdminId,
-      assignedAdminName,
-    } = body;
-
-    // At least one update must be provided
-    if (
-      !status &&
-      !department &&
-      !assignedAdminId &&
-      !assignedAdminName
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "No update information provided.",
-        },
-        { status: 400 }
-      );
-    }
-
-    // Validate status
-    if (
-      status &&
-      !VALID_STATUSES.includes(status)
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Invalid complaint status.",
-        },
-        { status: 400 }
-      );
-    }
-
-    // Validate department
-    if (
-      department &&
-      !VALID_DEPARTMENTS.includes(department)
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Invalid department.",
-        },
-        { status: 400 }
-      );
-    }
 
     await connectToDatabase();
 
@@ -160,25 +62,209 @@ export async function PATCH(
 
     if (!complaint) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Complaint not found.",
-        },
+        { success: false, message: "Complaint not found." },
         { status: 404 }
       );
     }
 
-    // ==========================================
-    // DEPARTMENT ASSIGNMENT
-    // ==========================================
+    // CITIZEN: Confirm or reject resolution
+    if (body.citizenAction) {
+      const {
+        citizenAction,
+        citizenId,
+        feedback,
+        imageUrl,
+      } = body;
+
+      if (citizenId !== complaint.citizenId) {
+        return NextResponse.json(
+          { success: false, message: "Unauthorized citizen." },
+          { status: 403 }
+        );
+      }
+
+      if (complaint.status !== "Awaiting Citizen Verification") {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "This complaint is not awaiting verification.",
+          },
+          { status: 400 }
+        );
+      }
+
+      if (citizenAction === "confirm") {
+        complaint.citizenResolutionStatus = "Confirmed";
+        complaint.citizenResolutionFeedback = feedback || "";
+        complaint.citizenResolutionImageUrl = imageUrl || "";
+        complaint.citizenVerifiedAt = new Date();
+        complaint.status = "Resolved";
+
+        complaint.statusHistory.push({
+          status: "Resolved",
+          timestamp: new Date(),
+        });
+      } else if (citizenAction === "reject") {
+        if (!feedback || !feedback.trim()) {
+          return NextResponse.json(
+            {
+              success: false,
+              message: "Please provide a reason why the problem is not resolved.",
+            },
+            { status: 400 }
+          );
+        }
+
+        complaint.citizenResolutionStatus = "Rejected";
+        complaint.citizenResolutionFeedback = feedback;
+        complaint.citizenResolutionImageUrl = imageUrl || "";
+        complaint.citizenVerifiedAt = new Date();
+        complaint.status = "In Progress";
+
+        complaint.statusHistory.push({
+          status: "In Progress",
+          timestamp: new Date(),
+        });
+      } else {
+        return NextResponse.json(
+          { success: false, message: "Invalid citizen action." },
+          { status: 400 }
+        );
+      }
+
+      await complaint.save();
+
+      return NextResponse.json(
+        {
+          success: true,
+          message:
+            citizenAction === "confirm"
+              ? "Complaint marked as resolved successfully."
+              : "Complaint returned to In Progress.",
+          complaint,
+        },
+        { status: 200 }
+      );
+    }
+
+    // ADMIN: Submit completed work for citizen verification
+    if (body.submitForVerification === true) {
+      const { resolutionDescription } = body;
+
+      if (complaint.status !== "In Progress") {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Only In Progress complaints can be submitted for verification.",
+          },
+          { status: 400 }
+        );
+      }
+
+      if (!resolutionDescription || !resolutionDescription.trim()) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Please describe the work completed.",
+          },
+          { status: 400 }
+        );
+      }
+
+      complaint.resolutionDescription = resolutionDescription.trim();
+      complaint.resolutionSubmittedAt = new Date();
+      complaint.citizenResolutionStatus = "Pending";
+      complaint.citizenResolutionFeedback = "";
+      complaint.citizenResolutionImageUrl = "";
+      complaint.citizenVerifiedAt = undefined;
+
+      complaint.status = "Awaiting Citizen Verification";
+
+      complaint.statusHistory.push({
+        status: "Awaiting Citizen Verification",
+        timestamp: new Date(),
+      });
+
+      await complaint.save();
+
+      return NextResponse.json(
+        {
+          success: true,
+          message: "Complaint submitted for citizen verification.",
+          complaint,
+        },
+        { status: 200 }
+      );
+    }
+
+    // ADMIN: Update department, assignment, or normal status
+    const {
+      status,
+      department,
+      assignedAdminId,
+      assignedAdminName,
+    } = body;
+
+    if (
+      !status &&
+      !department &&
+      assignedAdminId === undefined &&
+      assignedAdminName === undefined
+    ) {
+      return NextResponse.json(
+        { success: false, message: "No update data provided." },
+        { status: 400 }
+      );
+    }
+
+    // Admin cannot directly mark a complaint as Resolved
+    if (status === "Resolved") {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Only the citizen can confirm resolution.",
+        },
+        { status: 403 }
+      );
+    }
+
+    if (status && !ADMIN_STATUSES.includes(status)) {
+      return NextResponse.json(
+        { success: false, message: "Invalid complaint status." },
+        { status: 400 }
+      );
+    }
+
+    if (department && !VALID_DEPARTMENTS.includes(department)) {
+      return NextResponse.json(
+        { success: false, message: "Invalid department." },
+        { status: 400 }
+      );
+    }
+
+    if (complaint.status === "Resolved") {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Resolved complaints cannot be modified.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (complaint.status === "Awaiting Citizen Verification") {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Wait for the citizen to verify the resolution.",
+        },
+        { status: 400 }
+      );
+    }
 
     if (department) {
       complaint.department = department;
     }
-
-    // ==========================================
-    // ADMIN ASSIGNMENT
-    // ==========================================
 
     if (assignedAdminId !== undefined) {
       complaint.assignedAdminId = assignedAdminId;
@@ -188,31 +274,17 @@ export async function PATCH(
       complaint.assignedAdminName = assignedAdminName;
     }
 
-    // ==========================================
-    // STATUS UPDATE
-    // ==========================================
+    if (status && complaint.status !== status) {
+      complaint.status = status;
 
-    if (status) {
-      const newStatus = status;
-
-      if (complaint.status !== newStatus) {
-        complaint.status = newStatus;
-
-        complaint.statusHistory.push({
-          status: newStatus,
-          timestamp: new Date(),
-        });
-      }
+      complaint.statusHistory.push({
+        status,
+        timestamp: new Date(),
+      });
     }
 
-    // If department/admin is assigned and
-    // status is not explicitly provided,
-    // automatically mark as Assigned.
-
     if (
-      (department ||
-        assignedAdminId ||
-        assignedAdminName) &&
+      (department || assignedAdminId !== undefined || assignedAdminName !== undefined) &&
       !status &&
       complaint.status !== "Assigned"
     ) {
@@ -235,16 +307,10 @@ export async function PATCH(
       { status: 200 }
     );
   } catch (error) {
-    console.error(
-      "Complaint Assignment/Update API Error:",
-      error
-    );
+    console.error("Complaint PATCH API Error:", error);
 
     return NextResponse.json(
-      {
-        success: false,
-        message: "Failed to update complaint.",
-      },
+      { success: false, message: "Failed to update complaint." },
       { status: 500 }
     );
   }
