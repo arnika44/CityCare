@@ -1,13 +1,13 @@
 
 import { NextResponse } from "next/server";
-import connectDB from "@/app/lib/mongodb";
-import Complaint from "@/app/models/Complaint";
+import { connectToDatabase } from "@/lib/mongodb";
+import Complaint from "@/models/Complaint";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    await connectDB();
+    await connectToDatabase();
 
     const [
       total,
@@ -42,6 +42,22 @@ export async function GET() {
         .lean(),
     ]);
 
+    const formattedDepartments = departments.map(
+      (item: { _id: string | null; count: number }) => ({
+        name: item._id || "Unassigned",
+        count: item.count,
+      })
+    );
+
+    const formattedComplaints = recentComplaints.map((item: any) => ({
+      _id: item._id.toString(),
+      category: item.category,
+      status: item.status,
+      department: item.department || "",
+      createdAt: item.createdAt,
+      location: item.location?.address || "",
+    }));
+
     return NextResponse.json({
       success: true,
       stats: {
@@ -53,11 +69,8 @@ export async function GET() {
         inProgress,
         resolved,
       },
-      departments: departments.map((item) => ({
-        name: item._id || "Unassigned",
-        count: item.count,
-      })),
-      recentComplaints,
+      departments: formattedDepartments,
+      recentComplaints: formattedComplaints,
     });
   } catch (error) {
     console.error("ADMIN DASHBOARD ERROR:", error);
@@ -67,7 +80,9 @@ export async function GET() {
         success: false,
         message: "Failed to fetch dashboard data.",
         error:
-          error instanceof Error ? error.message : "Unknown server error",
+          error instanceof Error
+            ? error.message
+            : "Unknown server error",
       },
       { status: 500 }
     );
