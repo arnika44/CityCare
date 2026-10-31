@@ -1,13 +1,13 @@
 
 import { NextResponse } from "next/server";
-import { connectToDatabase } from "@/lib/mongodb";
-import Complaint from "@/models/Complaint";
+import connectDB from "@/app/lib/mongodb";
+import Complaint from "@/app/models/Complaint";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    await connectToDatabase();
+    await connectDB();
 
     const [
       total,
@@ -16,7 +16,7 @@ export async function GET() {
       assigned,
       inProgress,
       resolved,
-      departmentStats,
+      departments,
       recentComplaints,
     ] = await Promise.all([
       Complaint.countDocuments(),
@@ -42,32 +42,8 @@ export async function GET() {
         .lean(),
     ]);
 
-    const departments: Record<string, number> = {
-      PWD: 0,
-      Water: 0,
-      Electricity: 0,
-      Sanitation: 0,
-      Traffic: 0,
-    };
-
-    departmentStats.forEach((item) => {
-      if (item._id && item._id in departments) {
-        departments[item._id] = item.count;
-      }
-    });
-
-    const recent = recentComplaints.map((item: any) => ({
-      _id: String(item._id),
-      category: item.category || "Other",
-      status: item.status || "Reported",
-      department: item.department || "Not Assigned",
-      createdAt: item.createdAt || null,
-      location: item.location?.address || "Location unavailable",
-    }));
-
     return NextResponse.json({
       success: true,
-
       stats: {
         total,
         pending: reported + verified,
@@ -77,17 +53,21 @@ export async function GET() {
         inProgress,
         resolved,
       },
-
-      departments,
-      recentComplaints: recent,
+      departments: departments.map((item) => ({
+        name: item._id || "Unassigned",
+        count: item.count,
+      })),
+      recentComplaints,
     });
   } catch (error) {
-    console.error("Admin Dashboard API Error:", error);
+    console.error("ADMIN DASHBOARD ERROR:", error);
 
     return NextResponse.json(
       {
         success: false,
         message: "Failed to fetch dashboard data.",
+        error:
+          error instanceof Error ? error.message : "Unknown server error",
       },
       { status: 500 }
     );
