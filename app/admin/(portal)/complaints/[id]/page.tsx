@@ -52,6 +52,18 @@ interface Complaint {
   updatedAt: string;
 }
 
+interface Citizen {
+  citizenId: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  pinCode?: string;
+  cityDistrict?: string;
+  state?: string;
+  profileImage?: string;
+}
+
 const STATUSES: ComplaintStatus[] = [
   "Reported",
   "Verified",
@@ -87,49 +99,6 @@ const DEPARTMENT_ADMINS: Record<
   },
 };
 
-function getSuggestedDepartment(category: string): Department | "" {
-  const value = category.toLowerCase();
-
-  if (
-    value.includes("pothole") ||
-    value.includes("road") ||
-    value.includes("drain")
-  ) {
-    return "PWD";
-  }
-
-  if (
-    value.includes("water") ||
-    value.includes("leak") ||
-    value.includes("waterlogging")
-  ) {
-    return "Water";
-  }
-
-  if (
-    value.includes("electric") ||
-    value.includes("streetlight") ||
-    value.includes("switch")
-  ) {
-    return "Electricity";
-  }
-
-  if (
-    value.includes("garbage") ||
-    value.includes("waste") ||
-    value.includes("sewage") ||
-    value.includes("dumping")
-  ) {
-    return "Sanitation";
-  }
-
-  if (value.includes("traffic")) {
-    return "Traffic";
-  }
-
-  return "";
-}
-
 function formatDate(date?: string) {
   if (!date) return "Not available";
 
@@ -164,6 +133,9 @@ export default function AdminComplaintDetailsPage() {
   const id = params.id as string;
 
   const [complaint, setComplaint] = useState<Complaint | null>(null);
+  const [citizen, setCitizen] = useState<Citizen | null>(null);
+  const [citizenLoading, setCitizenLoading] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updating, setUpdating] = useState(false);
@@ -201,6 +173,29 @@ export default function AdminComplaintDetailsPage() {
       setSelectedAdmin(item.assignedAdminId || "");
       setSelectedStatus(item.status);
       setResolutionDescription(item.resolutionDescription || "");
+
+      // Fetch citizen's registered profile
+      setCitizenLoading(true);
+      setCitizen(null);
+
+      try {
+        const citizenResponse = await fetch(
+          `/api/citizen/profile?citizenId=${encodeURIComponent(
+            item.citizenId
+          )}`,
+          { cache: "no-store" }
+        );
+
+        const citizenData = await citizenResponse.json();
+
+        if (citizenResponse.ok) {
+          setCitizen(citizenData.user || citizenData);
+        }
+      } catch (citizenError) {
+        console.error("Unable to fetch citizen information:", citizenError);
+      } finally {
+        setCitizenLoading(false);
+      }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Something went wrong."
@@ -299,9 +294,11 @@ export default function AdminComplaintDetailsPage() {
       return;
     }
 
-    if (!window.confirm(
-      "Submit this complaint for citizen verification?"
-    )) {
+    if (
+      !window.confirm(
+        "Submit this complaint for citizen verification?"
+      )
+    ) {
       return;
     }
 
@@ -450,6 +447,141 @@ export default function AdminComplaintDetailsPage() {
           {/* COMPLAINT INFORMATION */}
           <div className="space-y-6 xl:col-span-2">
 
+            {/* CITIZEN INFORMATION */}
+            <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <h2 className="text-xl font-extrabold tracking-tight text-slate-800">
+                  Citizen Information
+                </h2>
+
+                <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">
+                  Registered Citizen
+                </span>
+              </div>
+
+              {citizenLoading ? (
+                <p className="mt-5 text-sm font-medium text-slate-500">
+                  Loading citizen information...
+                </p>
+              ) : citizen ? (
+                <div className="mt-6 space-y-5">
+
+                  {citizen.profileImage && (
+                    <img
+                      src={citizen.profileImage}
+                      alt="Citizen profile"
+                      className="h-20 w-20 rounded-full border-2 border-blue-100 object-cover"
+                    />
+                  )}
+
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                        Citizen Name
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">
+                        {citizen.name || "Not provided"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                        Phone Number
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">
+                        {citizen.phone || "Not provided"}
+                      </p>
+
+                      {citizen.phone && (
+                        <a
+                          href={`tel:${citizen.phone}`}
+                          className="mt-2 inline-block text-sm font-bold text-blue-600 hover:text-blue-700"
+                        >
+                          Call Citizen
+                        </a>
+                      )}
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                        Email Address
+                      </p>
+                      <p className="mt-1 break-all text-sm font-semibold text-slate-800">
+                        {citizen.email || "Not provided"}
+                      </p>
+
+                      {citizen.email && (
+                        <a
+                          href={`mailto:${citizen.email}`}
+                          className="mt-2 inline-block text-sm font-bold text-blue-600 hover:text-blue-700"
+                        >
+                          Send Email
+                        </a>
+                      )}
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                        PIN Code
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">
+                        {citizen.pinCode || "Not provided"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                        City / District
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">
+                        {citizen.cityDistrict || "Not provided"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                        State
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">
+                        {citizen.state || "Not provided"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-slate-100 pt-5">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Registered Address
+                    </p>
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                      {citizen.address || "Address not provided in profile."}
+                    </p>
+                  </div>
+
+                  <div className="border-t border-slate-100 pt-5">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Citizen ID
+                    </p>
+                    <p className="mt-1 break-all text-sm font-semibold text-slate-700">
+                      {complaint.citizenId}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-5 rounded-xl bg-amber-50 p-4">
+                  <p className="text-sm font-semibold text-amber-800">
+                    Citizen profile information is not available.
+                  </p>
+                  <p className="mt-1 break-all text-xs text-amber-700">
+                    Citizen ID: {complaint.citizenId}
+                  </p>
+                  <p className="mt-2 text-xs text-amber-700">
+                    The citizen may need to register and complete their profile.
+                  </p>
+                </div>
+              )}
+            </section>
+
+            {/* COMPLAINT INFORMATION */}
             <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
               <h2 className="text-xl font-extrabold tracking-tight text-slate-800">
                 Complaint Information
@@ -476,7 +608,7 @@ export default function AdminComplaintDetailsPage() {
 
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                    Location
+                    Complaint Location
                   </p>
                   <p className="mt-2 text-sm text-slate-700">
                     {complaint.location?.address ||
@@ -510,10 +642,10 @@ export default function AdminComplaintDetailsPage() {
 
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                    Citizen ID
+                    Reported On
                   </p>
-                  <p className="mt-1 break-all text-sm font-semibold text-slate-700">
-                    {complaint.citizenId}
+                  <p className="mt-1 text-sm text-slate-700">
+                    {formatDate(complaint.createdAt)}
                   </p>
                 </div>
               </div>

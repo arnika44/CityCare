@@ -1,7 +1,8 @@
+
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type PostOffice = {
   Name: string;
@@ -18,18 +19,76 @@ type PinApiResponse = {
 export default function ProfilePage() {
   const [profileImage, setProfileImage] = useState<string | null>(null);
 
+  const [citizenId, setCitizenId] = useState("");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [address, setAddress] = useState("");
+
   const [pinCode, setPinCode] = useState("");
   const [cityDistrict, setCityDistrict] = useState("");
   const [state, setState] = useState("");
   const [pinLoading, setPinLoading] = useState(false);
   const [pinError, setPinError] = useState("");
 
-  // Current Location
   const [currentLocation, setCurrentLocation] = useState("");
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [showLocationDetails, setShowLocationDetails] = useState(false);
   const [landmark, setLandmark] = useState("");
   const [locationDetails, setLocationDetails] = useState("");
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  // Load profile from database
+  useEffect(() => {
+    const loadProfile = async () => {
+      const id = localStorage.getItem("citycare_citizen_id");
+
+      if (!id) {
+        setError("Please login first to access your profile.");
+        setIsLoading(false);
+        return;
+      }
+
+      setCitizenId(id);
+
+      try {
+        const response = await fetch(
+          `/api/citizen/profile?citizenId=${encodeURIComponent(id)}`
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.message || "Unable to load profile.");
+        }
+
+        const user = data.user || data;
+
+        setName(user.name || "");
+        setPhone(user.phone || "");
+        setEmail(user.email || "");
+        setAddress(user.address || "");
+        setPinCode(user.pinCode || "");
+        setCityDistrict(user.cityDistrict || "");
+        setState(user.state || "");
+        setProfileImage(user.profileImage || null);
+
+        localStorage.setItem("citycare_citizen_name", user.name || "");
+        localStorage.setItem("citycare_citizen_email", user.email || "");
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Unable to load profile."
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadProfile();
+  }, []);
 
   const handleImageChange = (
     e: React.ChangeEvent<HTMLInputElement>
@@ -37,6 +96,11 @@ export default function ProfilePage() {
     const file = e.target.files?.[0];
 
     if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("Please select a valid image.");
+      return;
+    }
 
     const imageUrl = URL.createObjectURL(file);
     setProfileImage(imageUrl);
@@ -52,9 +116,7 @@ export default function ProfilePage() {
     setState("");
     setPinError("");
 
-    if (value.length !== 6) {
-      return;
-    }
+    if (value.length !== 6) return;
 
     setPinLoading(true);
 
@@ -68,7 +130,6 @@ export default function ProfilePage() {
       }
 
       const data: PinApiResponse[] = await response.json();
-
       const result = data[0];
 
       if (
@@ -77,19 +138,14 @@ export default function ProfilePage() {
         result.PostOffice.length > 0
       ) {
         const postOffice = result.PostOffice[0];
-
         setCityDistrict(postOffice.District);
         setState(postOffice.State);
       } else {
-        setPinError(
-          "Invalid PIN code. Please enter a valid PIN code."
-        );
+        setPinError("Invalid PIN code. Please enter a valid PIN code.");
       }
-    } catch (error) {
-      console.error(error);
-      setPinError(
-        "Unable to fetch location details. Please try again."
-      );
+    } catch (err) {
+      console.error(err);
+      setPinError("Unable to fetch location details. Please try again.");
     } finally {
       setPinLoading(false);
     }
@@ -120,19 +176,18 @@ export default function ProfilePage() {
           }
 
           const data = await response.json();
-
-          const address = data.address || {};
+          const addressData = data.address || {};
 
           const parts = [
-            address.road,
-            address.neighbourhood,
-            address.suburb,
-            address.village,
-            address.town,
-            address.city,
-            address.district,
-            address.state,
-            address.postcode,
+            addressData.road,
+            addressData.neighbourhood,
+            addressData.suburb,
+            addressData.village,
+            addressData.town,
+            addressData.city,
+            addressData.district,
+            addressData.state,
+            addressData.postcode,
           ].filter(Boolean);
 
           const uniqueParts = [...new Set(parts)];
@@ -144,7 +199,7 @@ export default function ProfilePage() {
           } else {
             setCurrentLocation("Current location detected");
           }
-        } catch (error) {
+        } catch {
           setCurrentLocation(
             "Current location detected, but address could not be found."
           );
@@ -154,7 +209,6 @@ export default function ProfilePage() {
       },
       () => {
         setIsGettingLocation(false);
-
         alert(
           "Unable to get your location. Please allow location permission and try again."
         );
@@ -167,23 +221,89 @@ export default function ProfilePage() {
     );
   };
 
-  const handleSubmit = (
+  // Save Profile to Database
+  const handleSubmit = async (
     e: React.FormEvent<HTMLFormElement>
   ) => {
     e.preventDefault();
+    setError("");
 
-    if (pinCode.length !== 6) {
+    if (!citizenId) {
+      setError("Please login first to update your profile.");
+      return;
+    }
+
+    if (!name.trim() || !phone.trim() || !address.trim()) {
+      setError("Please fill in your name, phone number and complete address.");
+      return;
+    }
+
+    if (!/^[0-9]{10}$/.test(phone)) {
+      setError("Please enter a valid 10-digit phone number.");
+      return;
+    }
+
+    if (pinCode.length !== 6 || !cityDistrict || !state) {
       setPinError("Please enter a valid 6-digit PIN code.");
       return;
     }
 
-    if (!cityDistrict || !state) {
-      setPinError("Please enter a valid PIN code first.");
-      return;
-    }
+    setIsSaving(true);
 
-    alert("Profile updated successfully!");
+    try {
+      const response = await fetch("/api/citizen/profile", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          citizenId,
+          name: name.trim(),
+          phone: phone.trim(),
+          address: address.trim(),
+          pinCode,
+          cityDistrict,
+          state,
+          profileImage: profileImage || "",
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to update profile.");
+      }
+
+      const updatedUser = data.user || data;
+
+      setName(updatedUser.name || name);
+      setPhone(updatedUser.phone || phone);
+      setAddress(updatedUser.address || address);
+
+      localStorage.setItem("citycare_citizen_name", name.trim());
+      localStorage.setItem("citycare_citizen_email", email);
+
+      alert("Profile updated successfully!");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Unable to update profile."
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
+
+  if (isLoading) {
+    return (
+      <main className="px-6 py-10">
+        <div className="mx-auto w-full max-w-5xl">
+          <p className="text-center font-medium text-blue-600">
+            Loading your profile...
+          </p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="px-6 py-10">
@@ -205,7 +325,6 @@ export default function ProfilePage() {
 
           {/* Profile Photo */}
           <div className="flex flex-col items-center border-b pb-8">
-
             <div className="flex h-32 w-32 items-center justify-center overflow-hidden rounded-full border-4 border-blue-100 bg-gray-100">
               {profileImage ? (
                 <img
@@ -232,7 +351,6 @@ export default function ProfilePage() {
             <p className="mt-2 text-sm text-gray-600">
               JPG, PNG or JPEG
             </p>
-
           </div>
 
           {/* Form */}
@@ -249,6 +367,8 @@ export default function ProfilePage() {
 
               <input
                 type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
                 placeholder="Enter your full name"
                 required
                 className="w-full rounded-lg border border-gray-400 bg-white px-4 py-3 text-gray-900 placeholder:text-gray-700 outline-none focus:ring-2 focus:ring-blue-500"
@@ -257,7 +377,6 @@ export default function ProfilePage() {
 
             {/* PHONE + EMAIL */}
             <div className="grid gap-6 md:grid-cols-2">
-
               <div>
                 <label className="mb-2 block text-sm font-semibold text-gray-900">
                   Phone Number
@@ -265,6 +384,10 @@ export default function ProfilePage() {
 
                 <input
                   type="tel"
+                  value={phone}
+                  onChange={(e) =>
+                    setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
+                  }
                   placeholder="Enter your phone number"
                   required
                   className="w-full rounded-lg border border-gray-400 bg-white px-4 py-3 text-gray-900 placeholder:text-gray-700 outline-none focus:ring-2 focus:ring-blue-500"
@@ -278,12 +401,12 @@ export default function ProfilePage() {
 
                 <input
                   type="email"
-                  placeholder="Enter your email"
-                  required
-                  className="w-full rounded-lg border border-gray-400 bg-white px-4 py-3 text-gray-900 placeholder:text-gray-700 outline-none focus:ring-2 focus:ring-blue-500"
+                  value={email}
+                  readOnly
+                  placeholder="Your registered email"
+                  className="w-full rounded-lg border border-gray-400 bg-gray-100 px-4 py-3 text-gray-900 placeholder:text-gray-700 outline-none"
                 />
               </div>
-
             </div>
 
             {/* PIN CODE */}
@@ -318,7 +441,6 @@ export default function ProfilePage() {
 
             {/* CITY / DISTRICT + STATE */}
             <div className="grid gap-6 md:grid-cols-2">
-
               <div>
                 <label className="mb-2 block text-sm font-semibold text-gray-900">
                   City / District
@@ -346,7 +468,6 @@ export default function ProfilePage() {
                   className="w-full rounded-lg border border-gray-400 bg-gray-100 px-4 py-3 text-gray-900 placeholder:text-gray-700 outline-none"
                 />
               </div>
-
             </div>
 
             {/* ADDRESS */}
@@ -357,6 +478,8 @@ export default function ProfilePage() {
 
               <textarea
                 rows={4}
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
                 placeholder="Enter your complete address"
                 required
                 className="w-full resize-none rounded-lg border border-gray-400 bg-white px-4 py-3 text-gray-900 placeholder:text-gray-700 outline-none focus:ring-2 focus:ring-blue-500"
@@ -365,11 +488,8 @@ export default function ProfilePage() {
 
             {/* CURRENT LOCATION */}
             <div className="rounded-xl border border-blue-200 bg-blue-50 p-5">
-
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-
                 <div className="flex items-start gap-3">
-
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xl">
                     📍
                   </div>
@@ -384,7 +504,6 @@ export default function ProfilePage() {
                       nearby civic services and departments.
                     </p>
                   </div>
-
                 </div>
 
                 <button
@@ -397,21 +516,15 @@ export default function ProfilePage() {
                     ? "Detecting Location..."
                     : "Use My Current Location"}
                 </button>
-
               </div>
 
               {/* Detected Location */}
               {currentLocation && (
                 <div className="mt-5 rounded-xl border border-green-200 bg-white p-4">
-
                   <div className="flex items-start gap-3">
-
-                    <div className="mt-0.5 text-xl">
-                      📍
-                    </div>
+                    <div className="mt-0.5 text-xl">📍</div>
 
                     <div className="min-w-0 flex-1">
-
                       <p className="text-sm font-semibold text-green-700">
                         Location Detected
                       </p>
@@ -419,12 +532,9 @@ export default function ProfilePage() {
                       <p className="mt-1 text-sm leading-6 text-gray-700">
                         {currentLocation}
                       </p>
-
                     </div>
-
                   </div>
 
-                  {/* Add Location Details */}
                   <button
                     type="button"
                     onClick={() =>
@@ -437,11 +547,8 @@ export default function ProfilePage() {
                       : "+ Add Location Details"}
                   </button>
 
-                  {/* Extra Location Details */}
                   {showLocationDetails && (
                     <div className="mt-4 space-y-4 border-t pt-4">
-
-                      {/* Landmark */}
                       <div>
                         <label
                           htmlFor="landmark"
@@ -462,7 +569,6 @@ export default function ProfilePage() {
                         />
                       </div>
 
-                      {/* More About Location */}
                       <div>
                         <label
                           htmlFor="locationDetails"
@@ -487,23 +593,26 @@ export default function ProfilePage() {
                           opposite the bus stop, etc.
                         </p>
                       </div>
-
                     </div>
                   )}
-
                 </div>
               )}
-
             </div>
+
+            {error && (
+              <p className="rounded-lg bg-red-50 p-3 text-sm font-medium text-red-600">
+                {error}
+              </p>
+            )}
 
             {/* BUTTONS */}
             <div className="flex flex-wrap gap-4 border-t pt-6">
-
               <button
                 type="submit"
-                className="rounded-lg bg-blue-600 px-7 py-3 font-semibold text-white transition hover:bg-blue-700"
+                disabled={isSaving}
+                className="rounded-lg bg-blue-600 px-7 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Save Profile
+                {isSaving ? "Saving..." : "Save Profile"}
               </button>
 
               <Link
@@ -512,9 +621,7 @@ export default function ProfilePage() {
               >
                 Cancel
               </Link>
-
             </div>
-
           </form>
         </div>
       </div>
