@@ -2,26 +2,40 @@
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/mongodb";
 import User from "@/models/User";
+import { getCitizenSession } from "@/lib/citizenAuth";
 
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
+const isValidImageUrl = (value: unknown) => {
+  if (value === undefined || value === null || value === "") return true;
+
+  if (typeof value !== "string" || value.length > 2000) return false;
+
   try {
-    await connectToDatabase();
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+};
 
-    const { searchParams } = new URL(request.url);
-    const citizenId = searchParams.get("citizenId");
+export async function GET() {
+  try {
+    const session = await getCitizenSession();
 
-    if (!citizenId) {
+    if (!session) {
       return NextResponse.json(
-        { message: "Citizen ID is required." },
-        { status: 400 }
+        { message: "Please login to access your profile." },
+        { status: 401 }
       );
     }
 
-    const user = await User.findOne({ citizenId }).select(
-      "-passwordHash -_id -__v"
-    );
+    await connectToDatabase();
+
+    const user = await User.findOne({
+      citizenId: session.citizenId,
+      email: session.email,
+    }).select("-passwordHash -_id -__v");
 
     if (!user) {
       return NextResponse.json(
@@ -43,11 +57,20 @@ export async function GET(request: Request) {
 
 export async function PUT(request: Request) {
   try {
+    const session = await getCitizenSession();
+
+    if (!session) {
+      return NextResponse.json(
+        { message: "Please login to update your profile." },
+        { status: 401 }
+      );
+    }
+
     await connectToDatabase();
 
     const body = await request.json();
+
     const {
-      citizenId,
       name,
       phone,
       address,
@@ -57,7 +80,13 @@ export async function PUT(request: Request) {
       profileImage,
     } = body;
 
-    if (!citizenId || !name || !phone || !address) {
+    if (
+      typeof name !== "string" ||
+      !name.trim() ||
+      typeof phone !== "string" ||
+      typeof address !== "string" ||
+      !address.trim()
+    ) {
       return NextResponse.json(
         { message: "Name, phone and address are required." },
         { status: 400 }
@@ -71,18 +100,42 @@ export async function PUT(request: Request) {
       );
     }
 
+    if (
+      (pinCode !== undefined && typeof pinCode !== "string") ||
+      (cityDistrict !== undefined && typeof cityDistrict !== "string") ||
+      (state !== undefined && typeof state !== "string")
+    ) {
+      return NextResponse.json(
+        { message: "Invalid address details." },
+        { status: 400 }
+      );
+    }
+
+    if (!isValidImageUrl(profileImage)) {
+      return NextResponse.json(
+        { message: "Invalid profile image URL." },
+        { status: 400 }
+      );
+    }
+
     const user = await User.findOneAndUpdate(
-      { citizenId },
+      {
+        citizenId: session.citizenId,
+        email: session.email,
+      },
       {
         name: name.trim(),
         phone,
         address: address.trim(),
-        pinCode: pinCode || "",
-        cityDistrict: cityDistrict || "",
-        state: state || "",
+        pinCode: pinCode?.trim() || "",
+        cityDistrict: cityDistrict?.trim() || "",
+        state: state?.trim() || "",
         profileImage: profileImage || "",
       },
-      { new: true, runValidators: true }
+      {
+        new: true,
+        runValidators: true,
+      }
     ).select("-passwordHash -_id -__v");
 
     if (!user) {

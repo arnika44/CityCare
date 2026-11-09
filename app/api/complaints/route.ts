@@ -6,25 +6,26 @@ import Complaint, {
   type Department,
   type AIVerificationStatus,
 } from "@/models/Complaint";
+import Admin from "@/models/Admin";
+import { getAdminSession } from "@/lib/adminAuth";
+import { getCitizenSession } from "@/lib/citizenAuth";
 import { analyzeComplaint } from "@/lib/gemini";
+
+export const runtime = "nodejs";
 
 const departmentMap: Record<string, Department> = {
   Pothole: "PWD",
   "Road Damage": "PWD",
   "Open Drain": "PWD",
-
   Waterlogging: "Water",
   "Water Leakage": "Water",
   "Water Supply": "Water",
-
   Streetlight: "Electricity",
   Electricity: "Electricity",
-
   Garbage: "Sanitation",
   Sewage: "Sanitation",
   "Illegal Dumping": "Sanitation",
   Waste: "Sanitation",
-
   Traffic: "Traffic",
 };
 
@@ -53,13 +54,20 @@ function validateComplaintDetails(body: any) {
   } = body;
 
   if (
-    !citizenName?.trim() ||
-    !citizenPhone?.trim() ||
-    !citizenEmail?.trim() ||
-    !category ||
-    !description?.trim() ||
-    !imageUrl ||
-    !location?.address?.trim()
+    typeof citizenName !== "string" ||
+    !citizenName.trim() ||
+    typeof citizenPhone !== "string" ||
+    !citizenPhone.trim() ||
+    typeof citizenEmail !== "string" ||
+    !citizenEmail.trim() ||
+    typeof category !== "string" ||
+    !category.trim() ||
+    typeof description !== "string" ||
+    !description.trim() ||
+    typeof imageUrl !== "string" ||
+    !location ||
+    typeof location.address !== "string" ||
+    !location.address.trim()
   ) {
     return "Please provide name, phone, email, photo, category, description and complaint address.";
   }
@@ -74,10 +82,7 @@ function validateComplaintDetails(body: any) {
     return "Please enter a valid email address.";
   }
 
-  if (
-    typeof imageUrl !== "string" ||
-    !isValidCloudinaryImageUrl(imageUrl)
-  ) {
+  if (!isValidCloudinaryImageUrl(imageUrl)) {
     return "Please provide a valid Cloudinary complaint image.";
   }
 
@@ -95,8 +100,16 @@ function validateComplaintDetails(body: any) {
 
   if (
     hasLatitude &&
-    (typeof location.latitude !== "number" ||
-      typeof location.longitude !== "number")
+    (
+      typeof location.latitude !== "number" ||
+      typeof location.longitude !== "number" ||
+      !Number.isFinite(location.latitude) ||
+      !Number.isFinite(location.longitude) ||
+      location.latitude < -90 ||
+      location.latitude > 90 ||
+      location.longitude < -180 ||
+      location.longitude > 180
+    )
   ) {
     return "Invalid GPS coordinates.";
   }
@@ -104,7 +117,6 @@ function validateComplaintDetails(body: any) {
   return null;
 }
 
-// Safely extract the actual AI error without exposing API keys.
 function getAIErrorMessage(error: unknown): string {
   let message =
     error instanceof Error
@@ -178,31 +190,99 @@ async function verifyComplaintWithAI(
   }
 }
 
-// GET: Fetch citizen complaints or all complaints for admin.
+function isValidComplaintId(id: unknown): id is string {
+  return (
+    typeof id === "string" &&
+    /^[a-f\d]{24}$/i.test(id)
+  );
+}
+
+// GET: Fetch citizen complaints or authorized admin complaints.
 export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url);
+    await connectToDatabase();
 
-    const citizenId = searchParams.get("citizenId");
+    const { searchParams } = new URL(request.url);
     const isAdmin = searchParams.get("admin") === "true";
 
-    if (!citizenId && !isAdmin) {
+    if (isAdmin) {
+      const session = await getAdminSession();
+
+      if (!session) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Unauthorized. Please login.",
+          },
+          { status: 401 }
+        );
+      }
+
+      const admin = await Admin.findById(session.id)
+        .select("role department isActive")
+        .lean();
+
+      if (!admin || !admin.isActive) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Admin access denied.",
+          },
+          { status: 403 }
+        );
+      }
+
+      let complaintFilter: Record<string, any>;
+
+      if (admin.role === "super-admin") {
+        complaintFilter = {};
+      } else if (
+        admin.role === "department-admin" &&
+        admin.department
+      ) {
+        complaintFilter = {
+          department: admin.department,
+        };
+      } else {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Invalid admin permissions.",
+          },
+          { status: 403 }
+        );
+      }
+
+      const complaints = await Complaint.find(complaintFilter)
+        .sort({ createdAt: -1 })
+        .lean();
+
       return NextResponse.json(
         {
-          success: false,
-          message: "Citizen ID is required.",
+          success: true,
+          complaints,
         },
-        { status: 400 }
+        { status: 200 }
       );
     }
 
-    await connectToDatabase();
+    const session = await getCitizenSession();
 
-    const complaints = isAdmin
-      ? await Complaint.find({}).sort({ createdAt: -1 }).lean()
-      : await Complaint.find({ citizenId })
-          .sort({ createdAt: -1 })
-          .lean();
+    if (!session) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Please login to view your complaints.",
+        },
+        { status: 401 }
+      );
+    }
+
+    const complaints = await Complaint.find({
+      citizenId: session.citizenId,
+    })
+      .sort({ createdAt: -1 })
+      .lean();
 
     return NextResponse.json(
       {
@@ -224,15 +304,26 @@ export async function GET(request: Request) {
   }
 }
 
-// POST: Create a new complaint.
+// POST: Create a complaint for the authenticated citizen.
 export async function POST(request: Request) {
   try {
+    const session = await getCitizenSession();
+
+    if (!session) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Please login to submit a complaint.",
+        },
+        { status: 401 }
+      );
+    }
+
     await connectToDatabase();
 
     const body = await request.json();
 
     const {
-      citizenId,
       citizenName,
       citizenPhone,
       citizenEmail,
@@ -243,16 +334,6 @@ export async function POST(request: Request) {
       landmark,
       locationDetails,
     } = body;
-
-    if (!citizenId) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Citizen ID is required. Please login again.",
-        },
-        { status: 400 }
-      );
-    }
 
     const validationError = validateComplaintDetails(body);
 
@@ -273,11 +354,11 @@ export async function POST(request: Request) {
     );
 
     const complaint = await Complaint.create({
-      citizenId,
+      citizenId: session.citizenId,
 
       citizenName: citizenName.trim(),
       citizenPhone: citizenPhone.trim(),
-      citizenEmail: citizenEmail.trim().toLowerCase(),
+      citizenEmail: session.email.toLowerCase(),
 
       ...aiVerification,
 
@@ -294,8 +375,13 @@ export async function POST(request: Request) {
           : {}),
       },
 
-      landmark: landmark || "",
-      locationDetails: locationDetails || "",
+      landmark:
+        typeof landmark === "string" ? landmark.trim() : "",
+
+      locationDetails:
+        typeof locationDetails === "string"
+          ? locationDetails.trim()
+          : "",
 
       status: "Reported",
     });
@@ -329,27 +415,25 @@ export async function POST(request: Request) {
   }
 }
 
-// DELETE: A citizen can delete only their own complaint.
+// DELETE: Delete only the authenticated citizen's own complaint.
 export async function DELETE(request: Request) {
   try {
-    const body = await request.json();
+    const session = await getCitizenSession();
 
-    const { complaintId, citizenId } = body;
-
-    if (!complaintId || !citizenId) {
+    if (!session) {
       return NextResponse.json(
         {
           success: false,
-          message: "Complaint ID and Citizen ID are required.",
+          message: "Please login to delete a complaint.",
         },
-        { status: 400 }
+        { status: 401 }
       );
     }
 
-    if (
-      typeof complaintId !== "string" ||
-      !/^[a-f\d]{24}$/i.test(complaintId)
-    ) {
+    const body = await request.json();
+    const { complaintId } = body;
+
+    if (!isValidComplaintId(complaintId)) {
       return NextResponse.json(
         {
           success: false,
@@ -359,23 +443,11 @@ export async function DELETE(request: Request) {
       );
     }
 
-    if (typeof citizenId !== "string" || !citizenId.trim()) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Invalid Citizen ID.",
-        },
-        { status: 400 }
-      );
-    }
-
     await connectToDatabase();
 
-    // Both IDs must match. A citizen cannot delete another
-    // citizen's complaint by changing the complaint ID.
     const deletedComplaint = await Complaint.findOneAndDelete({
       _id: complaintId,
-      citizenId: citizenId.trim(),
+      citizenId: session.citizenId,
     });
 
     if (!deletedComplaint) {
@@ -409,16 +481,27 @@ export async function DELETE(request: Request) {
   }
 }
 
-// PUT: Update an existing complaint.
+// PUT: Update only the authenticated citizen's own complaint.
 export async function PUT(request: Request) {
   try {
+    const session = await getCitizenSession();
+
+    if (!session) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Please login to update a complaint.",
+        },
+        { status: 401 }
+      );
+    }
+
     await connectToDatabase();
 
     const body = await request.json();
 
     const {
       complaintId,
-      citizenId,
       citizenName,
       citizenPhone,
       citizenEmail,
@@ -430,11 +513,11 @@ export async function PUT(request: Request) {
       locationDetails,
     } = body;
 
-    if (!complaintId || !citizenId) {
+    if (!isValidComplaintId(complaintId)) {
       return NextResponse.json(
         {
           success: false,
-          message: "Complaint ID and Citizen ID are required.",
+          message: "Invalid complaint ID.",
         },
         { status: 400 }
       );
@@ -454,7 +537,7 @@ export async function PUT(request: Request) {
 
     const complaint = await Complaint.findOne({
       _id: complaintId,
-      citizenId,
+      citizenId: session.citizenId,
     });
 
     if (!complaint) {
@@ -490,7 +573,7 @@ export async function PUT(request: Request) {
 
     complaint.citizenName = citizenName.trim();
     complaint.citizenPhone = citizenPhone.trim();
-    complaint.citizenEmail = citizenEmail.trim().toLowerCase();
+    complaint.citizenEmail = session.email.toLowerCase();
 
     complaint.category = aiVerification.category;
     complaint.reportedCategory = aiVerification.reportedCategory;
@@ -515,8 +598,13 @@ export async function PUT(request: Request) {
         : {}),
     };
 
-    complaint.landmark = landmark || "";
-    complaint.locationDetails = locationDetails || "";
+    complaint.landmark =
+      typeof landmark === "string" ? landmark.trim() : "";
+
+    complaint.locationDetails =
+      typeof locationDetails === "string"
+        ? locationDetails.trim()
+        : "";
 
     complaint.department = aiVerification.department;
 

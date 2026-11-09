@@ -3,28 +3,42 @@ import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { connectToDatabase } from "@/lib/mongodb";
 import Notification from "@/models/notification";
+import Complaint from "@/models/Complaint";
+import Admin from "@/models/Admin";
+import { getCitizenSession } from "@/lib/citizenAuth";
+import { getAdminSession } from "@/lib/adminAuth";
 
-// GET: Fetch all notifications for a citizen
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+const VALID_TYPES = [
+  "STATUS_UPDATE",
+  "COMPLAINT_ASSIGNED",
+  "COMPLAINT_RESOLVED",
+] as const;
+
+// GET: Fetch notifications for the logged-in citizen
 export async function GET(request: NextRequest) {
   try {
-    await connectToDatabase();
+    const session = await getCitizenSession();
 
-    const { searchParams } = new URL(request.url);
-    const citizenId = searchParams.get("citizenId");
-
-    if (!citizenId) {
+    if (!session) {
       return NextResponse.json(
-        { success: false, message: "Citizen ID is required" },
-        { status: 400 }
+        { success: false, message: "Please login first." },
+        { status: 401 }
       );
     }
 
-    const notifications = await Notification.find({ citizenId })
+    await connectToDatabase();
+
+    const notifications = await Notification.find({
+      citizenId: session.citizenId,
+    })
       .sort({ createdAt: -1 })
       .lean();
 
     const unreadCount = await Notification.countDocuments({
-      citizenId,
+      citizenId: session.citizenId,
       isRead: false,
     });
 
@@ -37,57 +51,91 @@ export async function GET(request: NextRequest) {
     console.error("Fetch notifications error:", error);
 
     return NextResponse.json(
-      { success: false, message: "Failed to fetch notifications" },
+      { success: false, message: "Failed to fetch notifications." },
       { status: 500 }
     );
   }
 }
 
-// POST: Create a notification
+// POST: Create a notification for a complaint
 export async function POST(request: NextRequest) {
   try {
+    const session = await getAdminSession();
+
+    if (!session) {
+      return NextResponse.json(
+        { success: false, message: "Admin login required." },
+        { status: 401 }
+      );
+    }
+
     await connectToDatabase();
+
+    const admin = await Admin.findOne({
+      _id: session.id,
+      isActive: true,
+    });
+
+    if (!admin) {
+      return NextResponse.json(
+        { success: false, message: "Admin account is not active." },
+        { status: 403 }
+      );
+    }
 
     const body = await request.json();
 
-    const {
-      citizenId,
-      complaintId,
-      title,
-      message,
-      type,
-    } = body;
+    const { complaintId, title, message, type } = body;
 
     if (
-      !citizenId ||
-      !complaintId ||
+      typeof complaintId !== "string" ||
       !mongoose.Types.ObjectId.isValid(complaintId) ||
-      !title ||
-      !message ||
-      ![
-        "STATUS_UPDATE",
-        "COMPLAINT_ASSIGNED",
-        "COMPLAINT_RESOLVED",
-      ].includes(type)
+      typeof title !== "string" ||
+      !title.trim() ||
+      typeof message !== "string" ||
+      !message.trim() ||
+      !VALID_TYPES.includes(type)
     ) {
       return NextResponse.json(
-        { success: false, message: "Invalid notification details" },
+        { success: false, message: "Invalid notification details." },
         { status: 400 }
       );
     }
 
+    const complaint = await Complaint.findById(complaintId);
+
+    if (!complaint) {
+      return NextResponse.json(
+        { success: false, message: "Complaint not found." },
+        { status: 404 }
+      );
+    }
+
+    if (
+      admin.role !== "super-admin" &&
+      admin.department !== complaint.department
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "You are not allowed to access this complaint.",
+        },
+        { status: 403 }
+      );
+    }
+
     const notification = await Notification.create({
-      citizenId: String(citizenId).trim(),
-      complaintId,
-      title: String(title).trim(),
-      message: String(message).trim(),
+      citizenId: complaint.citizenId,
+      complaintId: complaint._id,
+      title: title.trim(),
+      message: message.trim(),
       type,
     });
 
     return NextResponse.json(
       {
         success: true,
-        message: "Notification created successfully",
+        message: "Notification created successfully.",
         notification,
       },
       { status: 201 }
@@ -96,7 +144,7 @@ export async function POST(request: NextRequest) {
     console.error("Create notification error:", error);
 
     return NextResponse.json(
-      { success: false, message: "Failed to create notification" },
+      { success: false, message: "Failed to create notification." },
       { status: 500 }
     );
   }
@@ -105,63 +153,86 @@ export async function POST(request: NextRequest) {
 // PATCH: Mark one or all notifications as read
 export async function PATCH(request: NextRequest) {
   try {
-    await connectToDatabase();
+    const session = await getCitizenSession();
 
-    const body = await request.json();
-    const { notificationId, citizenId, markAll } = body;
-
-    if (!citizenId) {
+    if (!session) {
       return NextResponse.json(
-        { success: false, message: "Citizen ID is required" },
-        { status: 400 }
+        { success: false, message: "Please login first." },
+        { status: 401 }
       );
     }
 
+    await connectToDatabase();
+
+    const body = await request.json();
+    const { notificationId, markAll } = body;
+
+    // Mark all notifications as read
     if (markAll === true) {
       await Notification.updateMany(
-        { citizenId, isRead: false },
-        { $set: { isRead: true } }
+        {
+          citizenId: session.citizenId,
+          isRead: false,
+        },
+        {
+          $set: { isRead: true },
+        }
       );
 
       return NextResponse.json({
         success: true,
-        message: "All notifications marked as read",
+        message: "All notifications marked as read.",
       });
     }
 
+    // Validate notification ID
     if (
-      !notificationId ||
+      typeof notificationId !== "string" ||
       !mongoose.Types.ObjectId.isValid(notificationId)
     ) {
       return NextResponse.json(
-        { success: false, message: "Valid notification ID is required" },
+        {
+          success: false,
+          message: "Valid notification ID is required.",
+        },
         { status: 400 }
       );
     }
 
+    // Update only the logged-in citizen's notification
     const notification = await Notification.findOneAndUpdate(
-      { _id: notificationId, citizenId },
-      { $set: { isRead: true } },
-      { new: true }
+      {
+        _id: notificationId,
+        citizenId: session.citizenId,
+      },
+      {
+        $set: { isRead: true },
+      },
+      {
+        new: true,
+      }
     );
 
     if (!notification) {
       return NextResponse.json(
-        { success: false, message: "Notification not found" },
+        {
+          success: false,
+          message: "Notification not found.",
+        },
         { status: 404 }
       );
     }
 
     return NextResponse.json({
       success: true,
-      message: "Notification marked as read",
+      message: "Notification marked as read.",
       notification,
     });
   } catch (error) {
     console.error("Update notification error:", error);
 
     return NextResponse.json(
-      { success: false, message: "Failed to update notification" },
+      { success: false, message: "Failed to update notification." },
       { status: 500 }
     );
   }
