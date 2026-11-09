@@ -1,60 +1,13 @@
 
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/mongodb";
-import { getAdminSession } from "@/lib/adminAuth";
-import Admin from "@/models/Admin";
 import Complaint from "@/models/Complaint";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const session = await getAdminSession();
-
-    if (!session) {
-      return NextResponse.json(
-        { success: false, message: "Unauthorized. Please login." },
-        { status: 401 }
-      );
-    }
-
     await connectToDatabase();
-
-    const admin = await Admin.findById(session.id)
-      .select("role department isActive")
-      .lean();
-
-    if (!admin || !admin.isActive) {
-      return NextResponse.json(
-        { success: false, message: "Admin access denied." },
-        { status: 403 }
-      );
-    }
-
-    if (
-      admin.role !== "super-admin" &&
-      admin.role !== "department-admin"
-    ) {
-      return NextResponse.json(
-        { success: false, message: "Invalid admin role." },
-        { status: 403 }
-      );
-    }
-
-    if (
-      admin.role === "department-admin" &&
-      !admin.department
-    ) {
-      return NextResponse.json(
-        { success: false, message: "Department not assigned." },
-        { status: 403 }
-      );
-    }
-
-    const complaintFilter =
-      admin.role === "department-admin"
-        ? { department: admin.department }
-        : {};
 
     const [
       total,
@@ -66,35 +19,14 @@ export async function GET() {
       departments,
       recentComplaints,
     ] = await Promise.all([
-      Complaint.countDocuments(complaintFilter),
-
-      Complaint.countDocuments({
-        ...complaintFilter,
-        status: "Reported",
-      }),
-
-      Complaint.countDocuments({
-        ...complaintFilter,
-        status: "Verified",
-      }),
-
-      Complaint.countDocuments({
-        ...complaintFilter,
-        status: "Assigned",
-      }),
-
-      Complaint.countDocuments({
-        ...complaintFilter,
-        status: "In Progress",
-      }),
-
-      Complaint.countDocuments({
-        ...complaintFilter,
-        status: "Resolved",
-      }),
+      Complaint.countDocuments(),
+      Complaint.countDocuments({ status: "Reported" }),
+      Complaint.countDocuments({ status: "Verified" }),
+      Complaint.countDocuments({ status: "Assigned" }),
+      Complaint.countDocuments({ status: "In Progress" }),
+      Complaint.countDocuments({ status: "Resolved" }),
 
       Complaint.aggregate([
-        { $match: complaintFilter },
         {
           $group: {
             _id: "$department",
@@ -103,7 +35,7 @@ export async function GET() {
         },
       ]),
 
-      Complaint.find(complaintFilter)
+      Complaint.find()
         .select("category status department createdAt location")
         .sort({ createdAt: -1 })
         .limit(5)
@@ -117,16 +49,14 @@ export async function GET() {
       })
     );
 
-    const formattedComplaints = recentComplaints.map(
-      (item: any) => ({
-        _id: item._id.toString(),
-        category: item.category,
-        status: item.status,
-        department: item.department || "",
-        createdAt: item.createdAt,
-        location: item.location?.address || "",
-      })
-    );
+    const formattedComplaints = recentComplaints.map((item: any) => ({
+      _id: item._id.toString(),
+      category: item.category,
+      status: item.status,
+      department: item.department || "",
+      createdAt: item.createdAt,
+      location: item.location?.address || "",
+    }));
 
     return NextResponse.json({
       success: true,
@@ -149,6 +79,10 @@ export async function GET() {
       {
         success: false,
         message: "Failed to fetch dashboard data.",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown server error",
       },
       { status: 500 }
     );

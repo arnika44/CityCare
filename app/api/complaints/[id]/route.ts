@@ -3,12 +3,8 @@ import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/mongodb";
 import Complaint from "@/models/Complaint";
 import Notification from "@/models/notification";
-import Admin from "@/models/Admin";
-import { getAdminSession } from "@/lib/adminAuth";
-import { getCitizenSession } from "@/lib/citizenAuth";
 
 export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
 
 const ADMIN_STATUSES = [
   "Reported",
@@ -34,10 +30,7 @@ type NotificationType =
   | "COMPLAINT_ASSIGNED"
   | "COMPLAINT_RESOLVED";
 
-function isValidId(id: string) {
-  return /^[a-f\d]{24}$/i.test(id);
-}
-
+// Create notification without interrupting complaint updates
 async function createCitizenNotification(
   citizenId: string,
   complaintId: string,
@@ -60,39 +53,9 @@ async function createCitizenNotification(
   }
 }
 
-async function getActiveAdmin() {
-  const session = await getAdminSession();
-
-  if (!session?.id) return null;
-
-  const admin = await Admin.findById(session.id);
-
-  if (!admin || !admin.isActive) return null;
-
-  return admin;
-}
-
-function isDepartmentAllowed(
-  admin: any,
-  department: string | undefined
-) {
-  return (
-    admin.role === "super-admin" ||
-    (!!department && admin.department === department)
-  );
-}
-
-// GET: Fetch complaint for its owner or an authorized admin.
 export async function GET(request: Request, { params }: Context) {
   try {
     const { id } = await params;
-
-    if (!isValidId(id)) {
-      return NextResponse.json(
-        { success: false, message: "Invalid complaint ID." },
-        { status: 400 }
-      );
-    }
 
     await connectToDatabase();
 
@@ -102,51 +65,6 @@ export async function GET(request: Request, { params }: Context) {
       return NextResponse.json(
         { success: false, message: "Complaint not found." },
         { status: 404 }
-      );
-    }
-
-    const adminSession = await getAdminSession();
-
-    if (adminSession) {
-      const admin = await Admin.findById(adminSession.id)
-        .select("role department isActive")
-        .lean();
-
-      if (!admin || !admin.isActive) {
-        return NextResponse.json(
-          { success: false, message: "Admin access denied." },
-          { status: 403 }
-        );
-      }
-
-      if (
-        admin.role !== "super-admin" &&
-        !(
-          admin.role === "department-admin" &&
-          admin.department === complaint.department
-        )
-      ) {
-        return NextResponse.json(
-          { success: false, message: "You are not authorized to access this complaint." },
-          { status: 403 }
-        );
-      }
-
-      return NextResponse.json(
-        { success: true, complaint },
-        { status: 200 }
-      );
-    }
-
-    const citizenSession = await getCitizenSession();
-
-    if (
-      !citizenSession ||
-      citizenSession.citizenId !== complaint.citizenId
-    ) {
-      return NextResponse.json(
-        { success: false, message: "Unauthorized access." },
-        { status: 401 }
       );
     }
 
@@ -164,18 +82,9 @@ export async function GET(request: Request, { params }: Context) {
   }
 }
 
-// PATCH: Citizen resolution action or authorized admin update.
 export async function PATCH(request: Request, { params }: Context) {
   try {
     const { id } = await params;
-
-    if (!isValidId(id)) {
-      return NextResponse.json(
-        { success: false, message: "Invalid complaint ID." },
-        { status: 400 }
-      );
-    }
-
     const body = await request.json();
 
     await connectToDatabase();
@@ -189,21 +98,21 @@ export async function PATCH(request: Request, { params }: Context) {
       );
     }
 
-    // CITIZEN: Confirm or reject resolution.
+    // CITIZEN: Confirm or reject resolution
     if (body.citizenAction) {
-      const session = await getCitizenSession();
+      const {
+        citizenAction,
+        citizenId,
+        feedback,
+        imageUrl,
+      } = body;
 
-      if (
-        !session ||
-        session.citizenId !== complaint.citizenId
-      ) {
+      if (citizenId !== complaint.citizenId) {
         return NextResponse.json(
           { success: false, message: "Unauthorized citizen." },
-          { status: 401 }
+          { status: 403 }
         );
       }
-
-      const { citizenAction, feedback, imageUrl } = body;
 
       if (complaint.status !== "Awaiting Citizen Verification") {
         return NextResponse.json(
@@ -217,10 +126,8 @@ export async function PATCH(request: Request, { params }: Context) {
 
       if (citizenAction === "confirm") {
         complaint.citizenResolutionStatus = "Confirmed";
-        complaint.citizenResolutionFeedback =
-          typeof feedback === "string" ? feedback.trim() : "";
-        complaint.citizenResolutionImageUrl =
-          typeof imageUrl === "string" ? imageUrl : "";
+        complaint.citizenResolutionFeedback = feedback || "";
+        complaint.citizenResolutionImageUrl = imageUrl || "";
         complaint.citizenVerifiedAt = new Date();
         complaint.status = "Resolved";
 
@@ -229,24 +136,19 @@ export async function PATCH(request: Request, { params }: Context) {
           timestamp: new Date(),
         });
       } else if (citizenAction === "reject") {
-        if (
-          typeof feedback !== "string" ||
-          !feedback.trim()
-        ) {
+        if (!feedback || !feedback.trim()) {
           return NextResponse.json(
             {
               success: false,
-              message:
-                "Please provide a reason why the problem is not resolved.",
+              message: "Please provide a reason why the problem is not resolved.",
             },
             { status: 400 }
           );
         }
 
         complaint.citizenResolutionStatus = "Rejected";
-        complaint.citizenResolutionFeedback = feedback.trim();
-        complaint.citizenResolutionImageUrl =
-          typeof imageUrl === "string" ? imageUrl : "";
+        complaint.citizenResolutionFeedback = feedback;
+        complaint.citizenResolutionImageUrl = imageUrl || "";
         complaint.citizenVerifiedAt = new Date();
         complaint.status = "In Progress";
 
@@ -290,29 +192,7 @@ export async function PATCH(request: Request, { params }: Context) {
       );
     }
 
-    // ADMIN AUTHENTICATION.
-    const admin = await getActiveAdmin();
-
-    if (!admin) {
-      return NextResponse.json(
-        { success: false, message: "Unauthorized admin access." },
-        { status: 401 }
-      );
-    }
-
-    // DEPARTMENT ACCESS CONTROL.
-    if (!isDepartmentAllowed(admin, complaint.department)) {
-      return NextResponse.json(
-        {
-          success: false,
-          message:
-            "You are not authorized to access this department's complaint.",
-        },
-        { status: 403 }
-      );
-    }
-
-    // ADMIN: Submit completed work for citizen verification.
+    // ADMIN: Submit completed work for citizen verification
     if (body.submitForVerification === true) {
       const { resolutionDescription } = body;
 
@@ -320,17 +200,13 @@ export async function PATCH(request: Request, { params }: Context) {
         return NextResponse.json(
           {
             success: false,
-            message:
-              "Only In Progress complaints can be submitted for verification.",
+            message: "Only In Progress complaints can be submitted for verification.",
           },
           { status: 400 }
         );
       }
 
-      if (
-        typeof resolutionDescription !== "string" ||
-        !resolutionDescription.trim()
-      ) {
+      if (!resolutionDescription || !resolutionDescription.trim()) {
         return NextResponse.json(
           {
             success: false,
@@ -340,8 +216,7 @@ export async function PATCH(request: Request, { params }: Context) {
         );
       }
 
-      complaint.resolutionDescription =
-        resolutionDescription.trim();
+      complaint.resolutionDescription = resolutionDescription.trim();
       complaint.resolutionSubmittedAt = new Date();
       complaint.citizenResolutionStatus = "Pending";
       complaint.citizenResolutionFeedback = "";
@@ -375,7 +250,7 @@ export async function PATCH(request: Request, { params }: Context) {
       );
     }
 
-    // ADMIN: Update department, assignment, or normal status.
+    // ADMIN: Update department, assignment, or normal status
     const {
       status,
       department,
@@ -405,38 +280,17 @@ export async function PATCH(request: Request, { params }: Context) {
       );
     }
 
-    if (
-      status &&
-      !(ADMIN_STATUSES as readonly string[]).includes(status)
-    ) {
+    if (status && !ADMIN_STATUSES.includes(status)) {
       return NextResponse.json(
         { success: false, message: "Invalid complaint status." },
         { status: 400 }
       );
     }
 
-    if (
-      department &&
-      !(VALID_DEPARTMENTS as readonly string[]).includes(department)
-    ) {
+    if (department && !VALID_DEPARTMENTS.includes(department)) {
       return NextResponse.json(
         { success: false, message: "Invalid department." },
         { status: 400 }
-      );
-    }
-
-    if (
-      department &&
-      admin.role !== "super-admin" &&
-      department !== admin.department
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          message:
-            "You cannot transfer complaints to another department.",
-        },
-        { status: 403 }
       );
     }
 
@@ -454,8 +308,7 @@ export async function PATCH(request: Request, { params }: Context) {
       return NextResponse.json(
         {
           success: false,
-          message:
-            "Wait for the citizen to verify the resolution.",
+          message: "Wait for the citizen to verify the resolution.",
         },
         { status: 400 }
       );
@@ -464,8 +317,7 @@ export async function PATCH(request: Request, { params }: Context) {
     const previousStatus = complaint.status;
 
     const assignmentChanged =
-      (department !== undefined &&
-        department !== complaint.department) ||
+      (department !== undefined && department !== complaint.department) ||
       (assignedAdminId !== undefined &&
         assignedAdminId !== complaint.assignedAdminId) ||
       (assignedAdminName !== undefined &&
@@ -493,9 +345,7 @@ export async function PATCH(request: Request, { params }: Context) {
     }
 
     if (
-      (department ||
-        assignedAdminId !== undefined ||
-        assignedAdminName !== undefined) &&
+      (department || assignedAdminId !== undefined || assignedAdminName !== undefined) &&
       !status &&
       complaint.status !== "Assigned"
     ) {
@@ -509,27 +359,18 @@ export async function PATCH(request: Request, { params }: Context) {
 
     await complaint.save();
 
-    if (
-      complaint.status !== previousStatus ||
-      assignmentChanged
-    ) {
+    if (complaint.status !== previousStatus || assignmentChanged) {
       const isAssigned =
         complaint.status === "Assigned" || assignmentChanged;
 
       await createCitizenNotification(
         complaint.citizenId,
         complaint._id.toString(),
+        isAssigned ? "Complaint Assigned" : "Complaint Status Updated",
         isAssigned
-          ? "Complaint Assigned"
-          : "Complaint Status Updated",
-        isAssigned
-          ? `Your complaint has been assigned to ${
-              complaint.department || "a department"
-            }.`
+          ? `Your complaint has been assigned to ${complaint.department || "a department"}.`
           : `Your complaint status has been updated to ${complaint.status}.`,
-        isAssigned
-          ? "COMPLAINT_ASSIGNED"
-          : "STATUS_UPDATE"
+        isAssigned ? "COMPLAINT_ASSIGNED" : "STATUS_UPDATE"
       );
     }
 
@@ -545,10 +386,7 @@ export async function PATCH(request: Request, { params }: Context) {
     console.error("Complaint PATCH API Error:", error);
 
     return NextResponse.json(
-      {
-        success: false,
-        message: "Failed to update complaint.",
-      },
+      { success: false, message: "Failed to update complaint." },
       { status: 500 }
     );
   }

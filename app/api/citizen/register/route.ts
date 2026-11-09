@@ -7,39 +7,13 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    await connectToDatabase();
 
-    const name =
-      typeof body.name === "string" ? body.name.trim() : "";
-
-    const email =
-      typeof body.email === "string"
-        ? body.email.trim().toLowerCase()
-        : "";
-
-    const phone =
-      typeof body.phone === "string" ? body.phone.trim() : "";
-
-    const password =
-      typeof body.password === "string" ? body.password : "";
+    const { name, email, phone, password } = await request.json();
 
     if (!name || !email || !phone || !password) {
       return NextResponse.json(
         { message: "All fields are required." },
-        { status: 400 }
-      );
-    }
-
-    if (name.length > 100) {
-      return NextResponse.json(
-        { message: "Name must not exceed 100 characters." },
-        { status: 400 }
-      );
-    }
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return NextResponse.json(
-        { message: "Enter a valid email address." },
         { status: 400 }
       );
     }
@@ -51,16 +25,18 @@ export async function POST(request: Request) {
       );
     }
 
-    if (password.length < 6 || password.length > 128) {
+    if (password.length < 6) {
       return NextResponse.json(
-        { message: "Password must contain 6 to 128 characters." },
+        { message: "Password must contain at least 6 characters." },
         { status: 400 }
       );
     }
 
-    await connectToDatabase();
+    const normalizedEmail = email.trim().toLowerCase();
 
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({
+      email: normalizedEmail,
+    });
 
     if (existingUser) {
       return NextResponse.json(
@@ -70,19 +46,12 @@ export async function POST(request: Request) {
     }
 
     const salt = randomBytes(16).toString("hex");
-
-    const hash = pbkdf2Sync(
-      password,
-      salt,
-      100000,
-      64,
-      "sha512"
-    ).toString("hex");
+    const hash = pbkdf2Sync(password, salt, 100000, 64, "sha512").toString("hex");
 
     const user = await User.create({
       citizenId: randomUUID(),
-      name,
-      email,
+      name: name.trim(),
+      email: normalizedEmail,
       phone,
       passwordHash: `${salt}:${hash}`,
     });
@@ -94,14 +63,7 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-  } catch (error: any) {
-    if (error?.code === 11000) {
-      return NextResponse.json(
-        { message: "An account with this email already exists." },
-        { status: 409 }
-      );
-    }
-
+  } catch (error) {
     console.error("Citizen registration error:", error);
 
     return NextResponse.json(

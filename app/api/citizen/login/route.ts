@@ -2,24 +2,14 @@ import { NextResponse } from "next/server";
 import { pbkdf2Sync, timingSafeEqual } from "crypto";
 import { connectToDatabase } from "@/lib/mongodb";
 import User from "@/models/User";
-import {
-  createCitizenToken,
-  setCitizenCookie,
-} from "@/lib/citizenAuth";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    await connectToDatabase();
 
-    const email =
-      typeof body.email === "string"
-        ? body.email.trim().toLowerCase()
-        : "";
-
-    const password =
-      typeof body.password === "string" ? body.password : "";
+    const { email, password } = await request.json();
 
     if (!email || !password) {
       return NextResponse.json(
@@ -28,38 +18,25 @@ export async function POST(request: Request) {
       );
     }
 
-    if (password.length > 128) {
+    const user = await User.findOne({
+      email: email.trim().toLowerCase(),
+    });
+
+    if (!user) {
       return NextResponse.json(
         { message: "Invalid email or password." },
         { status: 401 }
       );
     }
 
-    await connectToDatabase();
+    const [salt, storedHash] = user.passwordHash.split(":");
 
-    const user = await User.findOne({ email });
-
-    if (!user || typeof user.passwordHash !== "string") {
-      return NextResponse.json(
-        { message: "Invalid email or password." },
-        { status: 401 }
-      );
-    }
-
-    const parts = user.passwordHash.split(":");
-
-    if (
-      parts.length !== 2 ||
-      !/^[a-f0-9]{32}$/i.test(parts[0]) ||
-      !/^[a-f0-9]{128}$/i.test(parts[1])
-    ) {
+    if (!salt || !storedHash) {
       return NextResponse.json(
         { message: "Invalid account credentials." },
         { status: 401 }
       );
     }
-
-    const [salt, storedHash] = parts;
 
     const enteredHash = pbkdf2Sync(
       password,
@@ -71,28 +48,22 @@ export async function POST(request: Request) {
 
     const savedHash = Buffer.from(storedHash, "hex");
 
-    if (!timingSafeEqual(savedHash, enteredHash)) {
+    if (
+      savedHash.length !== enteredHash.length ||
+      !timingSafeEqual(savedHash, enteredHash)
+    ) {
       return NextResponse.json(
         { message: "Invalid email or password." },
         { status: 401 }
       );
     }
 
-    const token = await createCitizenToken(
-      user.citizenId,
-      user.email
-    );
-
-    const response = NextResponse.json({
+    return NextResponse.json({
       message: "Login successful.",
       citizenId: user.citizenId,
       name: user.name,
       email: user.email,
     });
-
-    await setCitizenCookie(response, token);
-
-    return response;
   } catch (error) {
     console.error("Citizen login error:", error);
 
