@@ -111,6 +111,7 @@ export default function AdminDashboard() {
       icon: "⏳",
       gradient: "from-amber-400 to-orange-500",
       light: "bg-amber-50",
+      link: "/admin/complaints?status=Pending",
     },
     {
       title: "In Progress",
@@ -256,7 +257,7 @@ export default function AdminDashboard() {
                 }}
                 aria-label={
                   card.link
-                    ? `View all ${card.title}`
+                    ? `View ${card.title}`
                     : card.title
                 }
                 className={`group relative block overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm transition duration-300 ${
@@ -279,7 +280,9 @@ export default function AdminDashboard() {
 
                     {card.link && (
                       <p className="mt-2 text-xs font-bold text-blue-600">
-                        View all complaints →
+                        {card.title === "Pending Complaints"
+                          ? "View Pending Complaints →"
+                          : "View all complaints →"}
                       </p>
                     )}
                   </div>

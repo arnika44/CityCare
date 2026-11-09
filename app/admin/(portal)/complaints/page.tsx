@@ -29,12 +29,23 @@ const statusStyles: Record<string, string> = {
   Resolved: "bg-emerald-50 text-emerald-700 ring-emerald-200",
 };
 
+const pendingStatuses = ["Reported", "Verified", "Assigned"];
+
 export default function AdminComplaintsPage() {
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
+
+  const [statusFilter, setStatusFilter] = useState(() => {
+    if (typeof window !== "undefined") {
+      return new URLSearchParams(window.location.search).get("status") === "Pending"
+        ? "Pending"
+        : "All";
+    }
+    return "All";
+  });
+
   const [categoryFilter, setCategoryFilter] = useState("All");
 
   const fetchComplaints = useCallback(async () => {
@@ -76,10 +87,9 @@ export default function AdminComplaintsPage() {
   const countStatus = (status: string) =>
     complaints.filter((complaint) => complaint.status === status).length;
 
-  const pendingCount =
-    countStatus("Reported") +
-    countStatus("Verified") +
-    countStatus("Assigned");
+  const pendingCount = complaints.filter((complaint) =>
+    pendingStatuses.includes(complaint.status || "")
+  ).length;
 
   const categories = [
     "All",
@@ -102,7 +112,10 @@ export default function AdminComplaintsPage() {
       (complaint.location?.address || "").toLowerCase().includes(searchText);
 
     const matchesStatus =
-      statusFilter === "All" || complaint.status === statusFilter;
+      statusFilter === "All" ||
+      (statusFilter === "Pending"
+        ? pendingStatuses.includes(complaint.status || "")
+        : complaint.status === statusFilter);
 
     const matchesCategory =
       categoryFilter === "All" || complaint.category === categoryFilter;
@@ -269,6 +282,7 @@ export default function AdminComplaintsPage() {
                 className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               >
                 <option value="All">All Statuses</option>
+                <option value="Pending">Pending (Reported, Verified, Assigned)</option>
                 <option value="Reported">Reported</option>
                 <option value="Verified">Verified</option>
                 <option value="Assigned">Assigned</option>
@@ -302,7 +316,7 @@ export default function AdminComplaintsPage() {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-6 py-5">
             <div>
               <h2 className="text-xl font-extrabold tracking-tight text-slate-800">
-                All Complaints
+                {statusFilter === "Pending" ? "Pending Complaints" : "All Complaints"}
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
