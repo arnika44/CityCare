@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -102,6 +101,19 @@ export default function AdminComplaintsPage() {
     ),
   ];
 
+  const handleCardClick = (filter: string) => {
+    setStatusFilter(filter);
+    setCategoryFilter("All");
+    setSearch("");
+
+    setTimeout(() => {
+      document.getElementById("complaints-list")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 100);
+  };
+
   const filteredComplaints = complaints.filter((complaint) => {
     const searchText = search.toLowerCase();
 
@@ -109,7 +121,9 @@ export default function AdminComplaintsPage() {
       getComplaintId(complaint).toLowerCase().includes(searchText) ||
       (complaint.category || "").toLowerCase().includes(searchText) ||
       (complaint.description || "").toLowerCase().includes(searchText) ||
-      (complaint.location?.address || "").toLowerCase().includes(searchText);
+      (complaint.location?.address || "").toLowerCase().includes(searchText) ||
+      (complaint.department || "").toLowerCase().includes(searchText) ||
+      (complaint.assignedAdminName || "").toLowerCase().includes(searchText);
 
     const matchesStatus =
       statusFilter === "All" ||
@@ -144,6 +158,7 @@ export default function AdminComplaintsPage() {
       icon: "📋",
       gradient: "from-blue-500 to-indigo-600",
       light: "bg-blue-50",
+      filter: "All",
     },
     {
       title: "Pending Complaints",
@@ -151,6 +166,7 @@ export default function AdminComplaintsPage() {
       icon: "⏳",
       gradient: "from-amber-400 to-orange-500",
       light: "bg-amber-50",
+      filter: "Pending",
     },
     {
       title: "In Progress",
@@ -158,6 +174,7 @@ export default function AdminComplaintsPage() {
       icon: "🔄",
       gradient: "from-purple-500 to-fuchsia-600",
       light: "bg-purple-50",
+      filter: "In Progress",
     },
     {
       title: "Resolved",
@@ -165,6 +182,7 @@ export default function AdminComplaintsPage() {
       icon: "✓",
       gradient: "from-emerald-500 to-green-600",
       light: "bg-emerald-50",
+      filter: "Resolved",
     },
   ];
 
@@ -205,15 +223,21 @@ export default function AdminComplaintsPage() {
               Complaint Overview
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Current complaint statistics at a glance
+              Click any card to view its complaints.
             </p>
           </div>
 
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
             {summaryCards.map((card) => (
-              <div
+              <button
+                type="button"
                 key={card.title}
-                className="group relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-slate-200/70"
+                onClick={() => handleCardClick(card.filter)}
+                className={`group relative overflow-hidden rounded-2xl border bg-white p-6 text-left shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-xl ${
+                  statusFilter === card.filter
+                    ? "border-blue-400 ring-2 ring-blue-100"
+                    : "border-slate-200/80"
+                }`}
               >
                 <div className="absolute -right-7 -top-7 h-28 w-28 rounded-full bg-slate-50 transition group-hover:scale-125" />
 
@@ -229,7 +253,7 @@ export default function AdminComplaintsPage() {
                   </div>
 
                   <div
-                    className={`flex h-15 w-15 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${card.gradient} text-2xl text-white shadow-lg`}
+                    className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${card.gradient} text-2xl text-white shadow-lg`}
                   >
                     {card.icon}
                   </div>
@@ -240,7 +264,11 @@ export default function AdminComplaintsPage() {
                     className={`h-full w-2/3 rounded-full bg-gradient-to-r ${card.gradient}`}
                   />
                 </div>
-              </div>
+
+                <p className="relative mt-3 text-xs font-semibold text-blue-600">
+                  Click to view complaints →
+                </p>
+              </button>
             ))}
           </div>
         </section>
@@ -312,11 +340,18 @@ export default function AdminComplaintsPage() {
         </section>
 
         {/* ALL COMPLAINTS */}
-        <section className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+        <section
+          id="complaints-list"
+          className="scroll-mt-6 overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm"
+        >
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-6 py-5">
             <div>
               <h2 className="text-xl font-extrabold tracking-tight text-slate-800">
-                {statusFilter === "Pending" ? "Pending Complaints" : "All Complaints"}
+                {statusFilter === "Pending"
+                  ? "Pending Complaints"
+                  : statusFilter === "All"
+                    ? "All Complaints"
+                    : `${statusFilter} Complaints`}
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
@@ -325,7 +360,7 @@ export default function AdminComplaintsPage() {
             </div>
 
             <span className="rounded-xl bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-700">
-              {complaints.length} Total
+              {filteredComplaints.length} Showing / {complaints.length} Total
             </span>
           </div>
 
@@ -366,10 +401,10 @@ export default function AdminComplaintsPage() {
                     key={complaintId}
                     className="p-6 transition hover:bg-slate-50/80"
                   >
-                    <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
+                    <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
 
                       {/* IMAGE */}
-                      <div className="h-28 w-full shrink-0 overflow-hidden rounded-xl bg-slate-100 lg:w-32">
+                      <div className="h-36 w-full shrink-0 overflow-hidden rounded-xl bg-slate-100 lg:w-40">
                         {complaint.imageUrl ? (
                           <img
                             src={complaint.imageUrl}
@@ -383,10 +418,10 @@ export default function AdminComplaintsPage() {
                         )}
                       </div>
 
-                      {/* DETAILS */}
+                      {/* ALL COMPLAINT DETAILS */}
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-3">
-                          <h3 className="text-base font-extrabold text-slate-800">
+                          <h3 className="text-lg font-extrabold text-slate-800">
                             {complaint.category || "General Issue"}
                           </h3>
 
@@ -400,19 +435,70 @@ export default function AdminComplaintsPage() {
                           </span>
                         </div>
 
-                        <p className="mt-2 line-clamp-2 text-sm font-medium leading-6 text-slate-500">
-                          {complaint.description || "No description provided."}
-                        </p>
+                        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
 
-                        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs font-medium text-slate-500">
-                          <span>ID: {complaintId || "—"}</span>
-                          <span>📅 {formatDate(complaint.createdAt)}</span>
-                          <span>
-                            📍 {complaint.location?.address || "Location unavailable"}
-                          </span>
-                          <span>
-                            Department: {complaint.department || "Not Assigned"}
-                          </span>
+                          <div className="rounded-lg bg-slate-50 p-3">
+                            <p className="text-xs font-bold uppercase text-slate-400">
+                              Complaint ID
+                            </p>
+                            <p className="mt-1 break-all text-sm font-semibold text-slate-700">
+                              {complaintId || "—"}
+                            </p>
+                          </div>
+
+                          <div className="rounded-lg bg-slate-50 p-3">
+                            <p className="text-xs font-bold uppercase text-slate-400">
+                              Date
+                            </p>
+                            <p className="mt-1 text-sm font-semibold text-slate-700">
+                              {formatDate(complaint.createdAt)}
+                            </p>
+                          </div>
+
+                          <div className="rounded-lg bg-slate-50 p-3">
+                            <p className="text-xs font-bold uppercase text-slate-400">
+                              Department
+                            </p>
+                            <p className="mt-1 text-sm font-semibold text-slate-700">
+                              {complaint.department || "Not Assigned"}
+                            </p>
+                          </div>
+
+                          <div className="rounded-lg bg-slate-50 p-3">
+                            <p className="text-xs font-bold uppercase text-slate-400">
+                              Assigned Admin
+                            </p>
+                            <p className="mt-1 text-sm font-semibold text-slate-700">
+                              {complaint.assignedAdminName || "Not Assigned"}
+                            </p>
+                          </div>
+
+                          <div className="rounded-lg bg-slate-50 p-3 sm:col-span-2">
+                            <p className="text-xs font-bold uppercase text-slate-400">
+                              Location
+                            </p>
+                            <p className="mt-1 text-sm font-semibold text-slate-700">
+                              {complaint.location?.address || "Location unavailable"}
+                            </p>
+
+                            {(complaint.location?.latitude !== undefined ||
+                              complaint.location?.longitude !== undefined) && (
+                              <p className="mt-2 text-xs text-slate-500">
+                                Latitude: {complaint.location?.latitude ?? "—"}
+                                {" | "}
+                                Longitude: {complaint.location?.longitude ?? "—"}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="rounded-lg bg-slate-50 p-3 sm:col-span-2">
+                            <p className="text-xs font-bold uppercase text-slate-400">
+                              Description
+                            </p>
+                            <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                              {complaint.description || "No description provided."}
+                            </p>
+                          </div>
                         </div>
                       </div>
 
